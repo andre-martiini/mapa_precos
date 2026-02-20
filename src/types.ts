@@ -2,6 +2,7 @@ export interface Process {
   id: number;
   process_number: string;
   object: string;
+  pricing_strategy: 'sanitized' | 'mean' | 'median';
   created_at: string;
 }
 
