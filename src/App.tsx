@@ -15,11 +15,15 @@ import {
   Package,
   History,
   Pencil,
-  Table
+  Table,
+  Check,
+  AlertCircle,
+  X,
+  FileSpreadsheet
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Process, Item, Quote, Stats } from './types';
-import { calculateStats, formatCurrency, formatDate } from './utils';
+import { calculateStats, formatCurrency, formatDate, isQuoteExpired } from './utils';
 import { storage } from './storage';
 
 // --- Components ---
@@ -92,6 +96,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   // Form states
+  const [editingProcess, setEditingProcess] = useState<Process | null>(null);
   const [showProcessModal, setShowProcessModal] = useState(false);
   const [newProcess, setNewProcess] = useState({ process_number: '', object: '' });
   
@@ -108,6 +113,14 @@ export default function App() {
   const [editingQuote, setEditingQuote] = useState<{ quote: Quote, itemId: number } | null>(null);
   const [showQuoteModal, setShowQuoteModal] = useState<number | null>(null);
   const [newQuote, setNewQuote] = useState({ source: '', quote_date: new Date().toISOString().split('T')[0], unit_price: 0, quote_type: 'private' as const });
+  
+  const [showBancoPrecosModal, setShowBancoPrecosModal] = useState(false);
+  const [bancoPrecosText, setBancoPrecosText] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
+
+  const [analysisText, setAnalysisText] = useState("");
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{ type: 'process' | 'item' | 'quote', id: number } | null>(null);
+  const [showAlerts, setShowAlerts] = useState(false);
 
   useEffect(() => {
     fetchProcesses();
@@ -161,9 +174,14 @@ export default function App() {
   const handleCreateProcess = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await storage.createProcess(newProcess);
+      if (editingProcess) {
+        await storage.updateProcess(editingProcess.id, newProcess);
+      } else {
+        await storage.createProcess(newProcess);
+      }
       fetchProcesses();
       setShowProcessModal(false);
+      setEditingProcess(null);
       setNewProcess({ process_number: '', object: '' });
     } catch (e) { console.error(e); }
   };
@@ -190,31 +208,36 @@ export default function App() {
 
     const lines = batchItemText.split('\n').filter(line => line.trim());
     const newItems = lines.map((line, index) => {
-      const parts = line.split('\t');
-      // If not tab separated, try semi-colon (some CSVs)
-      const [spec, unit, qty] = parts.length >= 3 ? parts : line.split(';');
+      // Try different separators: Tab, Semicolon, Comma
+      let parts = line.split('\t');
+      if (parts.length < 2) parts = line.split(';');
+      if (parts.length < 2) parts = line.split(',');
+
+      const [spec, unit, qty] = parts;
 
       return {
         item_number: items.length + index + 1,
         specification: spec?.trim() || '',
         unit: unit?.trim() || 'UN',
-        quantity: parseFloat(qty?.trim().replace(',', '.') || '0') || 0,
+        quantity: parseFloat(qty?.trim().replace(/\./g, '').replace(',', '.') || '0') || 0,
         pricing_strategy: 'sanitized' as const
       };
     }).filter(it => it.specification);
 
-    if (newItems.length === 0) return;
+    if (newItems.length === 0) {
+      alert('Nenhum dado válido encontrado. Verifique o formato das colunas.');
+      return;
+    }
 
     try {
-      await fetch(`/api/processes/${selectedProcess.id}/items/batch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: newItems })
-      });
-      fetchProcessDetails(selectedProcess);
+      await storage.batchCreateItems(selectedProcess.id, newItems);
+      await fetchProcessDetails(selectedProcess);
       setShowBatchItemModal(false);
       setBatchItemText('');
-    } catch (e) { console.error(e); }
+    } catch (e) { 
+      console.error(e);
+      alert('Erro ao salvar itens. Tente novamente.');
+    }
   };
 
   const handleCreateQuote = async (e: React.FormEvent) => {
@@ -239,15 +262,38 @@ export default function App() {
 
     const lines = batchQuoteText.split('\n').filter(line => line.trim());
     const newQuotes = lines.map(line => {
-      const parts = line.split('\t');
-      const [source, date, type, price] = parts.length >= 4 ? parts : line.split(';');
+      // Try different separators: Tab, Semicolon, Comma
+      let parts = line.split('\t');
+      if (parts.length < 2) parts = line.split(';');
+      if (parts.length < 2) parts = line.split(',');
+
+      const [source, date, type, price] = parts;
 
       const isPublic = type?.toLowerCase().includes('pub') || type?.toLowerCase().includes('púb');
 
       let formattedDate = date?.trim() || '';
-      if (formattedDate.includes('/')) {
-        const [d, m, y] = formattedDate.split('/');
-        formattedDate = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+      // Normalizar formatos como "10 de Dezembro de 2025" ou "10/12/2025"
+      if (formattedDate.includes(' de ') || formattedDate.includes('/')) {
+        const months: { [key: string]: string } = {
+          janeiro: '01', fevereiro: '02', 'março': '03', abril: '04', maio: '05', junho: '06',
+          julho: '07', agosto: '08', setembro: '09', outubro: '10', novembro: '11', dezembro: '12'
+        };
+        
+        let d, m, y;
+        if (formattedDate.includes('/')) {
+          [d, m, y] = formattedDate.split('/');
+        } else {
+          const parts = formattedDate.toLowerCase().replace(/ de /g, ' ').split(' ');
+          if (parts.length === 3) {
+            d = parts[0];
+            m = months[parts[1]] || '01';
+            y = parts[2];
+          }
+        }
+
+        if (d && m && y) {
+          formattedDate = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+        }
       }
 
       return {
@@ -258,51 +304,147 @@ export default function App() {
       };
     }).filter(q => q.source && q.unit_price > 0);
 
-    if (newQuotes.length === 0) return;
+    if (newQuotes.length === 0) {
+      alert('Nenhum dado válido encontrado. Verifique o formato das colunas.');
+      return;
+    }
 
     try {
-      await fetch(`/api/items/${showBatchQuoteModal}/quotes/batch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quotes: newQuotes })
-      });
-      fetchProcessDetails(selectedProcess);
+      await storage.batchCreateQuotes(showBatchQuoteModal, newQuotes);
+      await fetchProcessDetails(selectedProcess);
       setShowBatchQuoteModal(null);
       setBatchQuoteText('');
-    } catch (e) { console.error(e); }
+    } catch (e) { 
+      console.error(e);
+      alert('Erro ao salvar cotações. Tente novamente.');
+    }
+  };
+
+  const handleImportBancoPrecos = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProcess || !bancoPrecosText) return;
+
+    setIsImporting(true);
+    try {
+      const lines = bancoPrecosText.split('\n');
+      const results: { spec: string, quotes: any[] }[] = [];
+      let currentItem: any = null;
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        const itemMatch = line.match(/^(\d+)\t([^\t]+)\t\t/);
+        if (itemMatch && !line.includes('ComprasNet')) {
+          currentItem = { spec: itemMatch[2].trim(), quotes: [] };
+          results.push(currentItem);
+          continue;
+        }
+
+        const parts = line.split('\t');
+        if (currentItem && parts.length >= 9 && /^\d+$/.test(parts[0])) {
+          const source = parts[1]?.trim();
+          const dateStr = parts[7]?.trim();
+          const priceStr = parts[8]?.trim();
+
+          if (source && dateStr && priceStr) {
+            let isoDate = "";
+            if (dateStr.includes('/')) {
+              const [d, m, y] = dateStr.split('/');
+              isoDate = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+            }
+
+            const price = parseFloat(priceStr.replace('R$', '').replace(/\./g, '').replace(',', '.').trim());
+
+            if (isoDate && !isNaN(price)) {
+              currentItem.quotes.push({
+                source,
+                quote_date: isoDate,
+                quote_type: 'public',
+                unit_price: price
+              });
+            }
+          }
+        }
+      }
+
+      let importedCount = 0;
+      for (const res of results) {
+        if (res.quotes.length === 0) continue;
+
+        const targetItem = items.find(it => 
+          it.specification.toLowerCase().includes(res.spec.toLowerCase().substring(0, 20)) ||
+          res.spec.toLowerCase().includes(it.specification.toLowerCase().substring(0, 20))
+        );
+
+        if (targetItem) {
+          await storage.batchCreateQuotes(targetItem.id, res.quotes);
+          importedCount += res.quotes.length;
+        }
+      }
+
+      await fetchProcessDetails(selectedProcess);
+      setShowBancoPrecosModal(false);
+      setBancoPrecosText('');
+      alert(`${importedCount} cotações importadas com sucesso.`);
+    } catch (e) {
+      console.error(e);
+      alert('Erro ao processar dados.');
+    } finally {
+      setIsImporting(false);
+    }
   };
 
   const handleDeleteProcess = async (id: number) => {
-    if (!confirm('Deseja excluir este processo e todos os seus itens?')) return;
-    await storage.deleteProcess(id);
-    fetchProcesses();
+    if (deleteConfirmation?.type === 'process' && deleteConfirmation.id === id) {
+      await storage.deleteProcess(id);
+      fetchProcesses();
+      setDeleteConfirmation(null);
+    } else {
+      setDeleteConfirmation({ type: 'process', id });
+      setTimeout(() => setDeleteConfirmation(null), 3000);
+    }
   };
 
   const handleDeleteItem = async (id: number) => {
-    if (!confirm('Deseja excluir este item?')) return;
-    await storage.deleteItem(id);
-    if (selectedProcess) fetchProcessDetails(selectedProcess);
+    if (deleteConfirmation?.type === 'item' && deleteConfirmation.id === id) {
+      await storage.deleteItem(id);
+      if (selectedProcess) fetchProcessDetails(selectedProcess);
+      setDeleteConfirmation(null);
+    } else {
+      setDeleteConfirmation({ type: 'item', id });
+      setTimeout(() => setDeleteConfirmation(null), 3000);
+    }
   };
 
   const handleDeleteQuote = async (id: number) => {
-    await storage.deleteQuote(id);
-    if (selectedProcess) fetchProcessDetails(selectedProcess);
+    if (deleteConfirmation?.type === 'quote' && deleteConfirmation.id === id) {
+      await storage.deleteQuote(id);
+      if (selectedProcess) fetchProcessDetails(selectedProcess);
+      setDeleteConfirmation(null);
+    } else {
+      setDeleteConfirmation({ type: 'quote', id });
+      setTimeout(() => setDeleteConfirmation(null), 3000);
+    }
   };
 
   if (view === 'export' && selectedProcess) {
     return (
       <div className="min-h-screen bg-white p-4 max-w-[1600px] mx-auto overflow-x-auto">
-        <div className="flex justify-between items-center mb-8 no-print">
+        <div className="flex justify-between items-center mb-8 print:hidden">
           <Button variant="secondary" onClick={() => setView('process')}>
             <ArrowLeft size={18} /> Voltar
           </Button>
           <div className="flex gap-4 items-center">
-            <span className="text-sm font-bold text-slate-500">Configuração Global:</span>
+            <span className="text-sm font-bold text-slate-500">Metodologia Global:</span>
             <select 
-              className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm"
+              className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-[#326131]"
               onChange={(e) => {
                 const strategy = e.target.value as any;
+                if (!strategy) return;
                 setItems(items.map(it => ({ ...it, pricing_strategy: strategy })));
+                // Clear analysis text to force regeneration with new methodology
+                setAnalysisText("");
               }}
             >
               <option value="">Alterar todos para...</option>
@@ -316,159 +458,233 @@ export default function App() {
           </div>
         </div>
 
-        <div className="text-center mb-8 border-b-2 border-slate-900 pb-6">
-          <h1 className="text-2xl font-bold uppercase tracking-tighter mb-1">Mapa Comparativo de Preços</h1>
-          <p className="text-slate-500 font-mono text-sm">Processo nº {selectedProcess.process_number}</p>
-          <p className="mt-2 text-md italic serif">Objeto: {selectedProcess.object}</p>
+        {/* Script to sync total value to analysis text */}
+        {(() => {
+          const total = items.reduce((acc, item) => {
+            const itemQuotes = quotes[item.id] || [];
+            const stats = calculateStats(itemQuotes, item.quantity);
+            let val = stats.sanitizedMean;
+            if (item.pricing_strategy === 'mean') val = stats.mean;
+            if (item.pricing_strategy === 'median') val = stats.median;
+            return acc + (val * item.quantity);
+          }, 0);
+          
+          const hasSanitized = items.some(it => it.pricing_strategy === 'sanitized');
+          const hasCommonMean = items.some(it => it.pricing_strategy === 'mean');
+          const hasMedian = items.some(it => it.pricing_strategy === 'median');
+
+          let methodology = "Média Saneada";
+          if (hasMedian && !hasSanitized) methodology = "Mediana";
+          if (hasCommonMean && !hasSanitized && !hasMedian) methodology = "Média Comum";
+          
+          const conclusionText = `Deste modo, a metologia aplicada foi a “${methodology}” sobre os valores encontrados que obteve o valor máximo estimado da cesta de produtos o total de ${formatCurrency(total)}`;
+          
+          const defaultText = `Observações:\n1. Planilha elaborada com base na Instrução Normativa ME/SEGES nº 73, de 05 de agosto de 2020.\n2. Informações contidas na planilha com base em pesquisas de preços comprovadas pelos orçamentos anexos.\n\nANÁLISE CRÍTICA: A estimativa apurada foi calçada em atendimento ao art. 5º da IN ME/SEGES Nº 73, de 05 de agosto de 2020. Consultou-se os potenciais concessionários e também o sistema denominado Banco de Preços (Preços Públicos) para obtenção dos valores estimados. Dentre os valores coletados, os valores que estão em disparate aos demais, foram desconsiderados.`;
+          
+          if (!analysisText) setAnalysisText(defaultText);
+          return null;
+        })()}
+
+        <div className="flex justify-between items-center mb-12 border-b-4 border-[#326131] pb-6 relative">
+          <div className="absolute left-0 top-0">
+            <img src="https://proen.ifes.edu.br/images/stories/ifes-horizontal-cor.png" alt="IFES" className="h-16 object-contain" />
+          </div>
+          <div className="w-full text-center">
+            <h1 className="text-3xl font-extrabold uppercase tracking-tight text-[#326131] mb-1">Mapa Comparativo de Preços</h1>
+            <p className="text-slate-500 font-mono text-sm">Processo nº {selectedProcess.process_number}</p>
+            <p className="mt-2 text-lg text-slate-700 font-medium">Objeto: {selectedProcess.object}</p>
+          </div>
         </div>
 
-        <table className="w-full border-collapse border border-slate-800 text-[10px]">
-          <thead>
-            <tr className="bg-slate-100 uppercase font-bold text-center">
-              <th className="border border-slate-800 p-1 w-8" rowSpan={2}>Item</th>
-              <th className="border border-slate-800 p-1 w-48" rowSpan={2}>Especificação Sucinta</th>
-              <th className="border border-slate-800 p-1 w-12" rowSpan={2}>UNID</th>
-              <th className="border border-slate-800 p-1 w-12" rowSpan={2}>Quant</th>
-              <th className="border border-slate-800 p-1" colSpan={3}>Preços</th>
-              
-              {/* Conditional Columns based on strategy */}
-              {(items.some(it => it.pricing_strategy === 'median' || it.pricing_strategy === 'sanitized')) && (
-                <th className="border border-slate-800 p-1" rowSpan={2}>Menor Valor Unitário</th>
-              )}
-              
-              <th className="border border-slate-800 p-1" rowSpan={2}>Média (Unitário)</th>
-              
-              {(items.some(it => it.pricing_strategy === 'median' || it.pricing_strategy === 'sanitized')) && (
-                <th className="border border-slate-800 p-1" rowSpan={2}>Mediana (Unitário)</th>
-              )}
-
-              {(items.some(it => it.pricing_strategy === 'sanitized')) && (
-                <>
-                  <th className="border border-slate-800 p-1" rowSpan={2}>Desvio Padrão</th>
-                  <th className="border border-slate-800 p-1" rowSpan={2}>CV (%)</th>
-                  <th className="border border-slate-800 p-1" rowSpan={2}>Limite Inferior</th>
-                  <th className="border border-slate-800 p-1" rowSpan={2}>Limite Superior</th>
-                  <th className="border border-slate-800 p-1" rowSpan={2}>Média Saneada</th>
-                </>
-              )}
-              
-              <th className="border border-slate-800 p-1 bg-slate-200" rowSpan={2}>Total Estimado</th>
-            </tr>
-            <tr className="bg-slate-100 uppercase font-bold text-center">
-              <th className="border border-slate-800 p-1 min-w-[120px]">Fornecedor</th>
-              <th className="border border-slate-800 p-1">Data</th>
-              <th className="border border-slate-800 p-1">Vlr. Unit.</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item) => {
-              const itemQuotes = quotes[item.id] || [];
-              const stats = calculateStats(itemQuotes, item.quantity);
-              const rowCount = Math.max(1, itemQuotes.length);
-              
-              const isSanitized = item.pricing_strategy === 'sanitized';
-              const isMedian = item.pricing_strategy === 'median';
-              const isMean = item.pricing_strategy === 'mean';
-
-              let finalUnitValue = stats.sanitizedMean;
-              if (isMean) finalUnitValue = stats.mean;
-              if (isMedian) finalUnitValue = stats.median;
-              
-              const finalTotal = finalUnitValue * item.quantity;
-
-              return (
-                <React.Fragment key={item.id}>
-                  {Array.from({ length: rowCount }).map((_, idx) => (
-                    <tr key={`${item.id}-${idx}`} className="hover:bg-slate-50">
-                      {idx === 0 && (
-                        <>
-                          <td className="border border-slate-800 p-1 text-center font-bold" rowSpan={rowCount}>{item.item_number}</td>
-                          <td className="border border-slate-800 p-1 align-top" rowSpan={rowCount}>{item.specification}</td>
-                          <td className="border border-slate-800 p-1 text-center" rowSpan={rowCount}>{item.unit}</td>
-                          <td className="border border-slate-800 p-1 text-center font-bold" rowSpan={rowCount}>{item.quantity}</td>
-                        </>
-                      )}
-                      
-                      {/* Quote Columns */}
-                      <td className="border border-slate-800 p-1 min-w-[120px]">
-                        {itemQuotes[idx]?.source || '-'}
-                      </td>
-                      <td className="border border-slate-800 p-1 text-center whitespace-nowrap">
-                        {itemQuotes[idx] ? formatDate(itemQuotes[idx].quote_date) : '-'}
-                      </td>
-                      <td className="border border-slate-800 p-1 text-right font-mono">
-                        {itemQuotes[idx] ? formatCurrency(itemQuotes[idx].unit_price) : '-'}
-                      </td>
-
-                      {idx === 0 && (
-                        <>
-                          {(items.some(it => it.pricing_strategy === 'median' || it.pricing_strategy === 'sanitized')) && (
-                            <td className="border border-slate-800 p-1 text-right font-mono" rowSpan={rowCount}>
-                              {isMedian || isSanitized ? formatCurrency(stats.min) : '-'}
+        <div className="overflow-hidden rounded-xl border border-slate-200 shadow-sm">
+          <table className="w-full border-collapse text-[10px]">
+            <thead>
+              <tr className="bg-[#326131] text-white uppercase font-bold text-center">
+                <th className="border border-white/20 p-2 w-8" rowSpan={2}>Item</th>
+                <th className="border border-white/20 p-2 w-48" rowSpan={2}>Especificação Sucinta</th>
+                <th className="border border-white/20 p-2 w-12" rowSpan={2}>UNID</th>
+                <th className="border border-white/20 p-2 w-12" rowSpan={2}>Quant</th>
+                <th className="border border-white/20 p-2" colSpan={3}>Preços Base</th>
+                
+                {/* Conditional Columns based on strategy */}
+                {(items.some(it => it.pricing_strategy === 'median' || it.pricing_strategy === 'sanitized')) && (
+                  <th className="border border-white/20 p-2" rowSpan={2}>Menor Valor Unitário</th>
+                )}
+                
+                <th className="border border-white/20 p-2" rowSpan={2}>Média (Unitário)</th>
+                
+                {(items.some(it => it.pricing_strategy === 'median' || it.pricing_strategy === 'sanitized')) && (
+                  <th className="border border-white/20 p-2" rowSpan={2}>Mediana (Unitário)</th>
+                )}
+  
+                {(items.some(it => it.pricing_strategy === 'sanitized')) && (
+                  <>
+                    <th className="border border-white/20 p-2" rowSpan={2}>Desvio Padrão</th>
+                    <th className="border border-white/20 p-2" rowSpan={2}>CV (%)</th>
+                    <th className="border border-white/20 p-2" rowSpan={2}>Limite Inferior</th>
+                    <th className="border border-white/20 p-2" rowSpan={2}>Limite Superior</th>
+                    <th className="border border-white/20 p-2" rowSpan={2}>Média Saneada</th>
+                  </>
+                )}
+                
+                <th className="border border-white/20 p-2 bg-[#1e3a1d]" rowSpan={2}>Total Estimado</th>
+              </tr>
+              <tr className="bg-[#326131] text-white uppercase font-bold text-center">
+                <th className="border border-white/20 p-2 min-w-[120px]">Fornecedor</th>
+                <th className="border border-white/20 p-2">Data</th>
+                <th className="border border-white/20 p-2">Vlr. Unit.</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item, itemIdx) => {
+                const itemQuotes = quotes[item.id] || [];
+                const stats = calculateStats(itemQuotes, item.quantity);
+                const rowCount = Math.max(1, itemQuotes.length);
+                
+                const isSanitized = item.pricing_strategy === 'sanitized';
+                const isMedian = item.pricing_strategy === 'median';
+                const isMean = item.pricing_strategy === 'mean';
+  
+                let finalUnitValue = stats.sanitizedMean;
+                if (isMean) finalUnitValue = stats.mean;
+                if (isMedian) finalUnitValue = stats.median;
+                
+                const finalTotal = finalUnitValue * item.quantity;
+                const isEvenRow = itemIdx % 2 === 0;
+  
+                return (
+                  <React.Fragment key={item.id}>
+                    {Array.from({ length: rowCount }).map((_, idx) => (
+                      <tr key={`${item.id}-${idx}`} className={`${isEvenRow ? 'bg-white' : 'bg-[#f0f9f0]'} hover:bg-emerald-50/50 transition-colors`}>
+                        {idx === 0 && (
+                          <>
+                            <td className="border border-slate-200 p-2 text-center font-bold text-[#326131]" rowSpan={rowCount}>{item.item_number}</td>
+                            <td className="border border-slate-200 p-2 align-top text-slate-700" rowSpan={rowCount}>{item.specification}</td>
+                            <td className="border border-slate-200 p-2 text-center text-slate-600" rowSpan={rowCount}>{item.unit}</td>
+                            <td className="border border-slate-200 p-2 text-center font-bold text-slate-700" rowSpan={rowCount}>{item.quantity}</td>
+                          </>
+                        )}
+                        
+                        {/* Quote Columns */}
+                        <td className="border border-slate-200 p-2 min-w-[120px] text-slate-600">
+                          {itemQuotes[idx]?.source || '-'}
+                        </td>
+                        <td className="border border-slate-200 p-2 text-center whitespace-nowrap text-slate-500">
+                          {itemQuotes[idx] ? formatDate(itemQuotes[idx].quote_date) : '-'}
+                        </td>
+                        <td className={`border border-slate-200 p-2 text-right font-mono ${
+                          isSanitized && itemQuotes[idx] && (itemQuotes[idx].unit_price < stats.lowerLimit || itemQuotes[idx].unit_price > stats.upperLimit)
+                            ? 'text-slate-400 line-through'
+                            : 'text-slate-600'
+                        }`}>
+                          {itemQuotes[idx] ? formatCurrency(itemQuotes[idx].unit_price) : '-'}
+                        </td>
+  
+                        {idx === 0 && (
+                          <>
+                            {(items.some(it => it.pricing_strategy === 'median' || it.pricing_strategy === 'sanitized')) && (
+                              <td className="border border-slate-200 p-2 text-center font-mono font-bold text-emerald-700 bg-emerald-50/30 text-xs" rowSpan={rowCount}>
+                                {isMedian || isSanitized ? formatCurrency(stats.min) : '-'}
+                              </td>
+                            )}
+                            
+                            <td className="border border-slate-200 p-2 text-center font-mono text-slate-600 text-xs" rowSpan={rowCount}>
+                              {formatCurrency(stats.mean)}
                             </td>
-                          )}
-                          
-                          <td className="border border-slate-800 p-1 text-right font-mono" rowSpan={rowCount}>
-                            {formatCurrency(stats.mean)}
-                          </td>
-                          
-                          {(items.some(it => it.pricing_strategy === 'median' || it.pricing_strategy === 'sanitized')) && (
-                            <td className="border border-slate-800 p-1 text-right font-mono" rowSpan={rowCount}>
-                              {isMedian || isSanitized ? formatCurrency(stats.median) : '-'}
+                            
+                            {(items.some(it => it.pricing_strategy === 'median' || it.pricing_strategy === 'sanitized')) && (
+                              <td className="border border-slate-200 p-2 text-center font-mono text-slate-600 text-xs" rowSpan={rowCount}>
+                                {isMedian || isSanitized ? formatCurrency(stats.median) : '-'}
+                              </td>
+                            )}
+  
+                            {(items.some(it => it.pricing_strategy === 'sanitized')) && (
+                              <>
+                                <td className="border border-slate-200 p-2 text-center font-mono text-slate-500 text-xs" rowSpan={rowCount}>
+                                  {isSanitized ? formatCurrency(stats.stdDev) : '-'}
+                                </td>
+                                <td className="border border-slate-200 p-2 text-center font-mono text-slate-500 text-xs" rowSpan={rowCount}>
+                                  {isSanitized ? `${stats.cv.toFixed(1)}%` : '-'}
+                                </td>
+                                <td className="border border-slate-200 p-2 text-center font-mono text-slate-500 text-xs" rowSpan={rowCount}>
+                                  {isSanitized ? formatCurrency(stats.lowerLimit) : '-'}
+                                </td>
+                                <td className="border border-slate-200 p-2 text-center font-mono text-slate-500 text-xs" rowSpan={rowCount}>
+                                  {isSanitized ? formatCurrency(stats.upperLimit) : '-'}
+                                </td>
+                                <td className="border border-slate-200 p-2 text-center font-mono text-slate-600 text-xs" rowSpan={rowCount}>
+                                  {isSanitized ? formatCurrency(stats.sanitizedMean) : '-'}
+                                </td>
+                              </>
+                            )}
+  
+                            <td className="border border-slate-200 p-2 text-center font-mono font-black text-[#1e3a1d] bg-emerald-100/50 text-xs" rowSpan={rowCount}>
+                                {formatCurrency(finalTotal)}
                             </td>
-                          )}
+                          </>
+                        )}
+                      </tr>
+                    ))}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr className="bg-[#1e3a1d] text-white font-bold uppercase">
+                <td colSpan={items.some(it => it.pricing_strategy === 'sanitized') ? 15 : (items.some(it => it.pricing_strategy === 'median') ? 10 : 8)} className="p-3 text-right text-xs">
+                  Valor Total da Pesquisa de Preços:
+                </td>
+                <td className="p-3 text-right font-mono text-sm tracking-wider">
+                  {formatCurrency(items.reduce((acc, item) => {
+                    const itemQuotes = quotes[item.id] || [];
+                    const stats = calculateStats(itemQuotes, item.quantity);
+                    let val = stats.sanitizedMean;
+                    if (item.pricing_strategy === 'mean') val = stats.mean;
+                    if (item.pricing_strategy === 'median') val = stats.median;
+                    return acc + (val * item.quantity);
+                  }, 0))}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
 
-                          {(items.some(it => it.pricing_strategy === 'sanitized')) && (
-                            <>
-                              <td className="border border-slate-800 p-1 text-right font-mono" rowSpan={rowCount}>
-                                {isSanitized ? formatCurrency(stats.stdDev) : '-'}
-                              </td>
-                              <td className="border border-slate-800 p-1 text-center font-mono" rowSpan={rowCount}>
-                                {isSanitized ? `${stats.cv.toFixed(2)}%` : '-'}
-                              </td>
-                              <td className="border border-slate-800 p-1 text-right font-mono" rowSpan={rowCount}>
-                                {isSanitized ? formatCurrency(stats.lowerLimit) : '-'}
-                              </td>
-                              <td className="border border-slate-800 p-1 text-right font-mono" rowSpan={rowCount}>
-                                {isSanitized ? formatCurrency(stats.upperLimit) : '-'}
-                              </td>
-                              <td className="border border-slate-800 p-1 text-right font-mono" rowSpan={rowCount}>
-                                {isSanitized ? formatCurrency(stats.sanitizedMean) : '-'}
-                              </td>
-                            </>
-                          )}
+        <div className="mt-8 mb-4 print:mb-0">
+          <textarea 
+            className="w-full min-h-[150px] p-4 text-xs text-slate-700 leading-relaxed border-none focus:ring-0 bg-transparent resize-none overflow-hidden print:p-0 print:min-h-0"
+            value={analysisText}
+            onChange={(e) => setAnalysisText(e.target.value)}
+            style={{ height: 'auto' }}
+            onInput={(e) => {
+              const target = e.target as HTMLTextAreaElement;
+              target.style.height = 'inherit';
+              target.style.height = `${target.scrollHeight}px`;
+            }}
+          />
+          <div className="px-4 py-2 text-xs text-slate-700 leading-relaxed font-bold print:px-0">
+            {(() => {
+              const total = items.reduce((acc, item) => {
+                const itemQuotes = quotes[item.id] || [];
+                const stats = calculateStats(itemQuotes, item.quantity);
+                let val = stats.sanitizedMean;
+                if (item.pricing_strategy === 'mean') val = stats.mean;
+                if (item.pricing_strategy === 'median') val = stats.median;
+                return acc + (val * item.quantity);
+              }, 0);
 
-                          <td className="border border-slate-800 p-1 text-right font-mono font-bold bg-slate-100" rowSpan={rowCount}>
-                            {formatCurrency(finalTotal)}
-                          </td>
-                        </>
-                      )}
-                    </tr>
-                  ))}
-                </React.Fragment>
-              );
-            })}
-          </tbody>
-          <tfoot>
-            <tr className="bg-slate-900 text-white font-bold uppercase">
-              <td colSpan={items.some(it => it.pricing_strategy === 'sanitized') ? 15 : (items.some(it => it.pricing_strategy === 'median') ? 10 : 8)} className="border border-slate-800 p-2 text-right">
-                Valor Total da Pesquisa:
-              </td>
-              <td className="border border-slate-800 p-2 text-right font-mono text-sm">
-                {formatCurrency(items.reduce((acc, item) => {
-                  const itemQuotes = quotes[item.id] || [];
-                  const stats = calculateStats(itemQuotes, item.quantity);
-                  let val = stats.sanitizedMean;
-                  if (item.pricing_strategy === 'mean') val = stats.mean;
-                  if (item.pricing_strategy === 'median') val = stats.median;
-                  return acc + (val * item.quantity);
-                }, 0))}
-              </td>
-            </tr>
-          </tfoot>
-        </table>
+              const hasSanitized = items.some(it => it.pricing_strategy === 'sanitized');
+              const hasCommonMean = items.some(it => it.pricing_strategy === 'mean');
+              const hasMedian = items.some(it => it.pricing_strategy === 'median');
+              let methodology = "Média Saneada";
+              if (hasMedian && !hasSanitized) methodology = "Mediana";
+              if (hasCommonMean && !hasSanitized && !hasMedian) methodology = "Média Comum";
 
-        <div className="mt-16 grid grid-cols-2 gap-12 text-center no-print">
+              return `Deste modo, a metologia aplicada foi a “${methodology}” sobre os valores encontrados que obteve o valor máximo estimado da cesta de produtos o total de ${formatCurrency(total)}`;
+            })()}
+          </div>
+        </div>
+
+        <div className="mt-16 grid grid-cols-2 gap-12 text-center print:mt-24">
           <div className="border-t border-slate-400 pt-4">
             <p className="font-bold">Responsável pela Pesquisa</p>
             <p className="text-sm text-slate-500">Nome e Assinatura</p>
@@ -485,34 +701,57 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
       {/* Sidebar */}
-      <aside className="fixed left-0 top-0 h-full w-64 bg-slate-900 text-white p-6 z-20 hidden md:block">
-        <div className="flex items-center gap-3 mb-12">
-          <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center">
-            <TrendingUp className="text-white" size={24} />
-          </div>
-          <h1 className="font-bold text-xl tracking-tight">MapaPro</h1>
+      <aside className="fixed left-0 top-0 h-full w-64 bg-slate-900 text-white z-20 hidden md:flex flex-col">
+        <div className="bg-white p-8 mb-6 flex items-center justify-center rounded-b-[2rem] shadow-lg">
+           <img src="https://proen.ifes.edu.br/images/stories/ifes-horizontal-cor.png" alt="IFES" className="h-10 object-contain" />
         </div>
 
-        <nav className="space-y-2">
+        <nav className="flex-1 px-4 space-y-2">
           <button 
-            onClick={() => setView('dashboard')}
+            onClick={() => { setView('dashboard'); setSelectedProcess(null); }}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${view === 'dashboard' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
           >
             <LayoutDashboard size={20} />
-            Dashboard
+            <span className="font-medium">Dashboard</span>
+          </button>
+          <button 
+            onClick={() => setShowAlerts(true)}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all relative ${showAlerts ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
+          >
+            <AlertCircle size={20} />
+            <span className="font-medium">Avisos</span>
+            {(() => {
+              let alertCount = 0;
+              if (selectedProcess) {
+                items.forEach(it => {
+                  const itQuotes = quotes[it.id] || [];
+                  const stats = calculateStats(itQuotes, it.quantity);
+                  
+                  // Alerta: Menos de 3 cotações válidas (não outliers)
+                  if (stats.validQuotes < 3) alertCount++;
+                  
+                  // Alerta: CV alto
+                  if (stats.cv > 25) alertCount++;
+
+                  // Alerta: Cotações vencidas
+                  itQuotes.forEach(q => { if (isQuoteExpired(q)) alertCount++; });
+                });
+              }
+              return alertCount > 0 ? (
+                <span className="absolute right-4 bg-red-500 text-white text-[10px] w-5 h-5 flex items-center justify-center rounded-full border-2 border-[#0f172a]">
+                  {alertCount}
+                </span>
+              ) : null;
+            })()}
           </button>
           <button 
             onClick={fetchHistory}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${view === 'history' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
           >
             <History size={20} />
-            Histórico
+            <span className="font-medium">Histórico</span>
           </button>
         </nav>
-
-        <div className="absolute bottom-8 left-6 right-6">
-          {/* Version removed as requested */}
-        </div>
       </aside>
 
       {/* Main Content */}
@@ -548,12 +787,31 @@ export default function App() {
                         <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded uppercase tracking-widest">
                           {p.process_number}
                         </span>
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); handleDeleteProcess(p.id); }}
-                          className="text-slate-300 hover:text-red-500 transition-colors"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={(e) => { 
+                              e.stopPropagation(); 
+                              setEditingProcess(p);
+                              setNewProcess({ process_number: p.process_number, object: p.object });
+                              setShowProcessModal(true);
+                            }}
+                            className="text-slate-300 hover:text-emerald-500 transition-colors p-1.5 rounded-lg hover:bg-emerald-50"
+                            title="Editar processo"
+                          >
+                            <Pencil size={16} />
+                          </button>
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); handleDeleteProcess(p.id); }}
+                            className={`p-1.5 rounded-lg transition-all ${
+                              deleteConfirmation?.type === 'process' && deleteConfirmation.id === p.id 
+                                ? 'bg-red-500 text-white' 
+                                : 'text-slate-300 hover:text-red-500 hover:bg-red-50'
+                            }`}
+                            title="Excluir processo"
+                          >
+                            {deleteConfirmation?.type === 'process' && deleteConfirmation.id === p.id ? <Check size={16} /> : <Trash2 size={16} />}
+                          </button>
+                        </div>
                       </div>
                       <h3 className="text-lg font-bold mb-2 line-clamp-2 group-hover:text-emerald-600 transition-colors">{p.object}</h3>
                       <div className="flex items-center gap-2 text-sm text-slate-400">
@@ -641,6 +899,9 @@ export default function App() {
                   <p className="text-sm text-slate-500 truncate max-w-md">{selectedProcess?.object}</p>
                 </div>
                 <div className="ml-auto flex gap-3">
+                  <Button variant="secondary" onClick={() => setShowBancoPrecosModal(true)}>
+                    <Table size={18} /> Banco de Preços
+                  </Button>
                   <Button variant="secondary" onClick={() => setView('export')}>
                     <FileText size={18} /> Ver Mapa Final
                   </Button>
@@ -660,7 +921,7 @@ export default function App() {
                   const hasHighCV = stats.cv > 25;
 
                   return (
-                    <Card key={item.id} className="border-l-4 border-l-slate-900">
+                    <Card key={item.id} id={`item-card-${item.id}`} className="border-l-4 border-l-slate-900 transition-all">
                       <div className="p-6">
                         <div className="flex justify-between items-start mb-6">
                           <div className="flex gap-4">
@@ -692,8 +953,12 @@ export default function App() {
                             }}>
                               <Pencil size={18} className="text-slate-400" />
                             </Button>
-                            <Button variant="ghost" onClick={() => handleDeleteItem(item.id)}>
-                              <Trash2 size={18} className="text-red-400" />
+                            <Button 
+                              variant="ghost" 
+                              onClick={() => handleDeleteItem(item.id)}
+                              className={deleteConfirmation?.type === 'item' && deleteConfirmation.id === item.id ? 'bg-red-500 text-white hover:bg-red-600' : ''}
+                            >
+                              {deleteConfirmation?.type === 'item' && deleteConfirmation.id === item.id ? <Check size={18} /> : <Trash2 size={18} className="text-red-400" />}
                             </Button>
                           </div>
                         </div>
@@ -760,9 +1025,13 @@ export default function App() {
                                       </div>
                                       <button 
                                         onClick={() => handleDeleteQuote(q.id)}
-                                        className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-300 hover:text-red-500"
+                                        className={`transition-all ${
+                                          deleteConfirmation?.type === 'quote' && deleteConfirmation.id === q.id 
+                                            ? 'text-red-500 scale-125' 
+                                            : 'opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500'
+                                        }`}
                                       >
-                                        <Trash2 size={14} />
+                                        {deleteConfirmation?.type === 'quote' && deleteConfirmation.id === q.id ? <Check size={14} /> : <Trash2 size={14} />}
                                       </button>
                                     </div>
                                   </div>
@@ -842,7 +1111,7 @@ export default function App() {
               exit={{ scale: 0.9, opacity: 0 }}
               className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl"
             >
-              <h3 className="text-2xl font-bold mb-6">Novo Processo</h3>
+              <h3 className="text-2xl font-bold mb-6">{editingProcess ? 'Editar Processo' : 'Novo Processo'}</h3>
               <form onSubmit={handleCreateProcess} className="space-y-6">
                 <Input 
                   label="Número do Processo / UASG" 
@@ -863,8 +1132,8 @@ export default function App() {
                   />
                 </div>
                 <div className="flex gap-3 pt-4">
-                  <Button variant="secondary" className="flex-1" onClick={() => setShowProcessModal(false)}>Cancelar</Button>
-                  <Button type="submit" className="flex-1">Criar Processo</Button>
+                  <Button variant="secondary" className="flex-1" onClick={() => { setShowProcessModal(false); setEditingProcess(null); setNewProcess({ process_number: '', object: '' }); }}>Cancelar</Button>
+                  <Button type="submit" className="flex-1">{editingProcess ? 'Salvar Alterações' : 'Criar Processo'}</Button>
                 </div>
               </form>
             </motion.div>
@@ -1066,7 +1335,6 @@ export default function App() {
             </motion.div>
           </div>
         )}
-      </AnimatePresence>
 
       <style>{`
         @media print {
@@ -1077,6 +1345,175 @@ export default function App() {
         }
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
       `}</style>
+      {/* Modal de Avisos */}
+      {showAlerts && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-6 bg-[#326131] text-white flex justify-between items-center">
+              <div className="flex items-center gap-3">
+                <AlertCircle size={24} />
+                <h3 className="text-xl font-bold">Central de Avisos</h3>
+              </div>
+              <button onClick={() => setShowAlerts(false)} className="hover:bg-white/20 p-2 rounded-full transition-colors">
+                <X size={24} />
+              </button>
+            </div>
+            
+            <div className="p-6 max-h-[70vh] overflow-y-auto">
+              {(() => {
+                const alerts: { type: 'error' | 'warning', msg: string, process: string, item?: string, itemId?: number }[] = [];
+                
+                // Logic to identify critical and optional alerts
+                items.forEach(it => {
+                  const itemQuotes = quotes[it.id] || [];
+                  const stats = calculateStats(itemQuotes, it.quantity);
+                  
+                  // Alerta 1: Menos de 3 cotações VÁLIDAS (excluindo outliers)
+                  if (stats.validQuotes < 3) {
+                    alerts.push({
+                      type: 'error',
+                      msg: `O item possui apenas ${stats.validQuotes} cotação(ões) válida(s) (desconsiderando outliers). O ideal para conformidade são pelo menos 3.`,
+                      process: selectedProcess?.process_number || '',
+                      item: it.specification,
+                      itemId: it.id
+                    });
+                  }
+
+                  // Alerta 2: Coeficiente de Variação (CV) Alto
+                  if (stats.cv > 25) {
+                    alerts.push({
+                      type: 'warning',
+                      msg: `Coeficiente de Variação elevado (${stats.cv.toFixed(2)}%). Recomenda-se obter mais cotações para maior precisão da média.`,
+                      process: selectedProcess?.process_number || '',
+                      item: it.specification,
+                      itemId: it.id
+                    });
+                  }
+
+                  // Alerta 3: Cotações Vencidas
+                  itemQuotes.forEach(q => {
+                    if (isQuoteExpired(q)) {
+                      alerts.push({
+                        type: 'warning',
+                        msg: `Cotação de "${q.source}" está com data vencida (>180/360 dias).`,
+                        process: selectedProcess?.process_number || '',
+                        item: it.specification,
+                        itemId: it.id
+                      });
+                    }
+                  });
+                });
+
+                if (alerts.length === 0) {
+                  return (
+                    <div className="text-center py-12">
+                      <div className="bg-emerald-50 text-emerald-600 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Check size={32} />
+                      </div>
+                      <p className="text-slate-600 font-medium">Tudo em ordem! Nenhum aviso pendente para este processo.</p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="space-y-4">
+                    {alerts.map((alert, i) => (
+                      <div 
+                        key={i} 
+                        onClick={() => {
+                          if (alert.itemId) {
+                            setShowAlerts(false);
+                            // Scroll to the item element
+                            setTimeout(() => {
+                              const element = document.getElementById(`item-card-${alert.itemId}`);
+                              if (element) {
+                                element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                element.classList.add('ring-2', 'ring-[#326131]', 'ring-offset-2');
+                                setTimeout(() => element.classList.remove('ring-2', 'ring-[#326131]', 'ring-offset-2'), 3000);
+                              }
+                            }, 100);
+                          }
+                        }}
+                        className={`p-4 rounded-2xl flex gap-4 transition-all cursor-pointer hover:shadow-md active:scale-[0.98] ${
+                          alert.type === 'error' ? 'bg-red-50 border border-red-100 hover:bg-red-100/50' : 'bg-amber-50 border border-amber-100 hover:bg-amber-100/50'
+                        }`}
+                      >
+                        <div className={`mt-0.5 ${alert.type === 'error' ? 'text-red-600' : 'text-amber-600'}`}>
+                          {alert.type === 'error' ? <AlertCircle size={20} /> : <AlertTriangle size={20} />}
+                        </div>
+                        <div className="flex-1">
+                          <p className={`font-bold text-sm ${alert.type === 'error' ? 'text-red-800' : 'text-amber-800'}`}>{alert.item || alert.process}</p>
+                          <p className={`text-sm ${alert.type === 'error' ? 'text-red-700' : 'text-amber-700'}`}>{alert.msg}</p>
+                        </div>
+                        <div className="flex items-center">
+                          <ChevronRight size={16} className="text-slate-400" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+            
+            <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end">
+              <Button onClick={() => setShowAlerts(false)}>Fechar Central</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+        {showBancoPrecosModal && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-3xl p-8 w-full max-w-3xl shadow-2xl"
+            >
+              <div className="flex justify-between items-start mb-6">
+                <div>
+                  <h3 className="text-2xl font-bold">Importar do Banco de Preços</h3>
+                  <p className="text-sm text-slate-500">Copie e cole aqui o conteúdo completo da planilha exportada pelo portal Banco de Preços.</p>
+                </div>
+                <div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center">
+                  <Download size={24} className="text-emerald-600" />
+                </div>
+              </div>
+
+              <form onSubmit={handleImportBancoPrecos} className="space-y-6">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Conteúdo da Planilha</label>
+                  <textarea
+                    className="w-full h-[350px] p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all font-mono text-xs leading-relaxed"
+                    placeholder="Cole aqui os dados copiados (incluindo as linhas de Itens e Cotações)..."
+                    required
+                    value={bancoPrecosText}
+                    onChange={e => setBancoPrecosText(e.target.value)}
+                  />
+                </div>
+                
+                <div className="bg-emerald-50 p-4 rounded-2xl flex gap-4 items-center">
+                  <div className="bg-emerald-500 p-2 rounded-lg text-white">
+                    <AlertCircle size={20} />
+                  </div>
+                  <p className="text-xs text-emerald-800 leading-relaxed font-medium">
+                    O sistema identificará automaticamente os itens pelo nome e vinculará as cotações públicas encontradas (Órgão, Data e Preço).
+                  </p>
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <Button variant="secondary" className="flex-1" onClick={() => { setShowBancoPrecosModal(false); setBancoPrecosText(''); }} disabled={isImporting}>
+                    Cancelar
+                  </Button>
+                  <Button type="submit" className="flex-1" disabled={isImporting}>
+                    {isImporting ? 'Processando dados...' : 'Importar Cotações'}
+                  </Button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

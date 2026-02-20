@@ -1,142 +1,127 @@
 import { Process, Item, Quote } from './types';
 
-const STORAGE_KEYS = {
-  PROCESSES: 'mapapro_processes',
-  ITEMS: 'mapapro_items',
-  QUOTES: 'mapapro_quotes'
-};
-
-const getStorage = <T>(key: string): T[] => {
-  const data = localStorage.getItem(key);
-  return data ? JSON.parse(data) : [];
-};
-
-const saveStorage = <T>(key: string, data: T[]) => {
-  localStorage.setItem(key, JSON.stringify(data));
-};
-
 export const storage = {
   // Processes
   async getProcesses(): Promise<Process[]> {
-    return getStorage<Process>(STORAGE_KEYS.PROCESSES).sort((a, b) =>
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
+    const res = await fetch('/api/processes');
+    if (!res.ok) throw new Error('Failed to fetch processes');
+    return res.json();
+  },
+
+  async getProcess(id: number): Promise<Process> {
+    const res = await fetch(`/api/processes/${id}`);
+    if (!res.ok) throw new Error('Failed to fetch process');
+    return res.json();
   },
 
   async createProcess(process: { process_number: string, object: string }): Promise<{ id: number }> {
-    const processes = getStorage<Process>(STORAGE_KEYS.PROCESSES);
-    const newProcess: Process = {
-      ...process,
-      id: Date.now(),
-      created_at: new Date().toISOString()
-    };
-    processes.push(newProcess);
-    saveStorage(STORAGE_KEYS.PROCESSES, processes);
-    return { id: newProcess.id };
+    const res = await fetch('/api/processes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(process)
+    });
+    if (!res.ok) throw new Error('Failed to create process');
+    return res.json();
+  },
+
+  async updateProcess(id: number, process: { process_number: string, object: string }): Promise<void> {
+    const res = await fetch(`/api/processes/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(process)
+    });
+    if (!res.ok) throw new Error('Failed to update process');
   },
 
   async deleteProcess(id: number): Promise<void> {
-    const processes = getStorage<Process>(STORAGE_KEYS.PROCESSES).filter(p => p.id !== id);
-    saveStorage(STORAGE_KEYS.PROCESSES, processes);
-
-    // Cascading delete items and quotes
-    const items = getStorage<Item>(STORAGE_KEYS.ITEMS);
-    const itemsToDelete = items.filter(it => it.process_id === id);
-    const remainingItems = items.filter(it => it.process_id !== id);
-    saveStorage(STORAGE_KEYS.ITEMS, remainingItems);
-
-    const quotes = getStorage<Quote>(STORAGE_KEYS.QUOTES);
-    const itemIdsToDelete = new Set(itemsToDelete.map(it => it.id));
-    const remainingQuotes = quotes.filter(q => !itemIdsToDelete.has(q.item_id));
-    saveStorage(STORAGE_KEYS.QUOTES, remainingQuotes);
+    const res = await fetch(`/api/processes/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed to delete process');
   },
 
   // Items
   async getItems(processId: number): Promise<Item[]> {
-    return getStorage<Item>(STORAGE_KEYS.ITEMS)
-      .filter(it => it.process_id === processId)
-      .sort((a, b) => a.item_number - b.item_number);
+    const res = await fetch(`/api/processes/${processId}/items`);
+    if (!res.ok) throw new Error('Failed to fetch items');
+    return res.json();
   },
 
   async createItem(processId: number, item: Omit<Item, 'id' | 'process_id'>): Promise<{ id: number }> {
-    const items = getStorage<Item>(STORAGE_KEYS.ITEMS);
-    const newItem: Item = {
-      ...item,
-      id: Date.now() + Math.floor(Math.random() * 1000),
-      process_id: processId
-    };
-    items.push(newItem);
-    saveStorage(STORAGE_KEYS.ITEMS, items);
-    return { id: newItem.id };
+    const res = await fetch(`/api/processes/${processId}/items`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item)
+    });
+    if (!res.ok) throw new Error('Failed to create item');
+    return res.json();
   },
 
   async updateItem(id: number, item: Omit<Item, 'id' | 'process_id'>): Promise<void> {
-    const items = getStorage<Item>(STORAGE_KEYS.ITEMS);
-    const index = items.findIndex(it => it.id === id);
-    if (index !== -1) {
-      items[index] = { ...items[index], ...item };
-      saveStorage(STORAGE_KEYS.ITEMS, items);
-    }
+    const res = await fetch(`/api/items/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item)
+    });
+    if (!res.ok) throw new Error('Failed to update item');
   },
 
   async deleteItem(id: number): Promise<void> {
-    const items = getStorage<Item>(STORAGE_KEYS.ITEMS).filter(it => it.id !== id);
-    saveStorage(STORAGE_KEYS.ITEMS, items);
-
-    // Cascading delete quotes
-    const quotes = getStorage<Quote>(STORAGE_KEYS.QUOTES).filter(q => q.item_id !== id);
-    saveStorage(STORAGE_KEYS.QUOTES, quotes);
+    const res = await fetch(`/api/items/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed to delete item');
   },
 
   // Quotes
   async getQuotes(itemId: number): Promise<Quote[]> {
-    return getStorage<Quote>(STORAGE_KEYS.QUOTES)
-      .filter(q => q.item_id === itemId)
-      .sort((a, b) => new Date(b.quote_date).getTime() - new Date(a.quote_date).getTime());
+    const res = await fetch(`/api/items/${itemId}/quotes`);
+    if (!res.ok) throw new Error('Failed to fetch quotes');
+    return res.json();
   },
 
   async createQuote(itemId: number, quote: Omit<Quote, 'id' | 'item_id'>): Promise<{ id: number }> {
-    const quotes = getStorage<Quote>(STORAGE_KEYS.QUOTES);
-    const newQuote: Quote = {
-      ...quote,
-      id: Date.now() + Math.floor(Math.random() * 1000),
-      item_id: itemId
-    };
-    quotes.push(newQuote);
-    saveStorage(STORAGE_KEYS.QUOTES, quotes);
-    return { id: newQuote.id };
+    const res = await fetch(`/api/items/${itemId}/quotes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(quote)
+    });
+    if (!res.ok) throw new Error('Failed to create quote');
+    return res.json();
   },
 
   async updateQuote(id: number, quote: Omit<Quote, 'id' | 'item_id'>): Promise<void> {
-    const quotes = getStorage<Quote>(STORAGE_KEYS.QUOTES);
-    const index = quotes.findIndex(q => q.id === id);
-    if (index !== -1) {
-      quotes[index] = { ...quotes[index], ...quote };
-      saveStorage(STORAGE_KEYS.QUOTES, quotes);
-    }
+    const res = await fetch(`/api/quotes/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(quote)
+    });
+    if (!res.ok) throw new Error('Failed to update quote');
   },
 
   async deleteQuote(id: number): Promise<void> {
-    const quotes = getStorage<Quote>(STORAGE_KEYS.QUOTES).filter(q => q.id !== id);
-    saveStorage(STORAGE_KEYS.QUOTES, quotes);
+    const res = await fetch(`/api/quotes/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed to delete quote');
+  },
+
+  async batchCreateItems(processId: number, items: any[]): Promise<void> {
+    const res = await fetch(`/api/processes/${processId}/items/batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items })
+    });
+    if (!res.ok) throw new Error('Failed to batch create items');
+  },
+
+  async batchCreateQuotes(itemId: number, quotes: any[]): Promise<void> {
+    const res = await fetch(`/api/items/${itemId}/quotes/batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ quotes })
+    });
+    if (!res.ok) throw new Error('Failed to batch create quotes');
   },
 
   // History
   async getHistory(): Promise<(Item & { process_number: string, object: string })[]> {
-    const items = getStorage<Item>(STORAGE_KEYS.ITEMS);
-    const processes = getStorage<Process>(STORAGE_KEYS.PROCESSES);
-
-    return items.map(item => {
-      const process = processes.find(p => p.id === item.process_id);
-      return {
-        ...item,
-        process_number: process?.process_number || '',
-        object: process?.object || ''
-      };
-    }).sort((a, b) => {
-      const procA = processes.find(p => p.id === a.process_id);
-      const procB = processes.find(p => p.id === b.process_id);
-      return new Date(procB?.created_at || 0).getTime() - new Date(procA?.created_at || 0).getTime();
-    });
+    const res = await fetch('/api/history');
+    if (!res.ok) throw new Error('Failed to fetch history');
+    return res.json();
   }
 };

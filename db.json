@@ -1,0 +1,257 @@
+{
+  "processes": [
+    {
+      "id": 5,
+      "process_number": "TEST-004",
+      "object": "Processo de Teste para Lote 4",
+      "created_at": "2026-02-20 20:26:39"
+    }
+  ],
+  "items": [
+    {
+      "id": 15,
+      "process_id": 1771622825817,
+      "item_number": 1,
+      "specification": "Recarga em extintores de incêndio de pó químico seco pressurizado.",
+      "unit": "Vasilhames de 6kg.",
+      "quantity": 10,
+      "pricing_strategy": "sanitized"
+    },
+    {
+      "id": 16,
+      "process_id": 1771622825817,
+      "item_number": 2,
+      "specification": "Recarga em extintores de incêndio de gás carbônico (CO2) pressurizado.",
+      "unit": "Vasilhames de 6kg.",
+      "quantity": 3,
+      "pricing_strategy": "sanitized"
+    },
+    {
+      "id": 17,
+      "process_id": 1771622825817,
+      "item_number": 3,
+      "specification": "Serviço de teste hidrostático das mangueiras 1 1/2\" de incêndio.",
+      "unit": "Serviço",
+      "quantity": 8,
+      "pricing_strategy": "sanitized"
+    },
+    {
+      "id": 18,
+      "process_id": 1771622825817,
+      "item_number": 1,
+      "specification": "Recarga em extintores de incêndio de pó químico seco pressurizado.",
+      "unit": "Vasilhames de 6kg.",
+      "quantity": 10,
+      "pricing_strategy": "sanitized"
+    },
+    {
+      "id": 19,
+      "process_id": 1771622825817,
+      "item_number": 2,
+      "specification": "Recarga em extintores de incêndio de gás carbônico (CO2) pressurizado.",
+      "unit": "Vasilhames de 6kg.",
+      "quantity": 3,
+      "pricing_strategy": "sanitized"
+    },
+    {
+      "id": 20,
+      "process_id": 1771622825817,
+      "item_number": 3,
+      "specification": "Serviço de teste hidrostático das mangueiras 1 1/2\" de incêndio.",
+      "unit": "Serviço",
+      "quantity": 8,
+      "pricing_strategy": "sanitized"
+    },
+    {
+      "id": 21,
+      "process_id": 1771622825817,
+      "item_number": 1,
+      "specification": "Recarga em extintores de incêndio de pó químico seco pressurizado.",
+      "unit": "Vasilhames de 6kg.",
+      "quantity": 10,
+      "pricing_strategy": "sanitized"
+    },
+    {
+      "id": 22,
+      "process_id": 1771622825817,
+      "item_number": 2,
+      "specification": "Recarga em extintores de incêndio de gás carbônico (CO2) pressurizado.",
+      "unit": "Vasilhames de 6kg.",
+      "quantity": 3,
+      "pricing_strategy": "sanitized"
+    },
+    {
+      "id": 23,
+      "process_id": 1771622825817,
+      "item_number": 3,
+      "specification": "Serviço de teste hidrostático das mangueiras 1 1/2\" de incêndio.",
+      "unit": "-",
+      "quantity": 8,
+      "pricing_strategy": "sanitized"
+    },
+    {
+      "id": 24,
+      "process_id": 5,
+      "item_number": 1,
+      "specification": "Recarga em extintores de incêndio de pó químico seco pressurizado.",
+      "unit": "Vasilhames de 6kg.",
+      "quantity": 10,
+      "pricing_strategy": "sanitized"
+    },
+    {
+      "id": 25,
+      "process_id": 5,
+      "item_number": 2,
+      "specification": "Recarga em extintores de incêndio de gás carbônico (CO2) pressurizado.",
+      "unit": "Vasilhames de 6kg.",
+      "quantity": 3,
+      "pricing_strategy": "sanitized"
+    },
+    {
+      "id": 26,
+      "process_id": 5,
+      "item_number": 3,
+      "specification": "Serviço de teste hidrostático das mangueiras 1 1/2\" de incêndio.",
+      "unit": "Serviço",
+      "quantity": 8,
+      "pricing_strategy": "sanitized"
+    }
+  ],
+  "quotes": [
+    {
+      "id": 1,
+      "item_id": 24,
+      "source": "NETO EQUIPAMENTOS",
+      "quote_date": "10 de Dezembro de 2025",
+      "unit_price": 40,
+      "quote_type": "private",
+      "is_outlier": 0
+    },
+    {
+      "id": 2,
+      "item_id": 24,
+      "source": "EXTINSAN EXTINTORES LTDA",
+      "quote_date": "10 de Dezembro de 2025",
+      "unit_price": 35,
+      "quote_type": "private",
+      "is_outlier": 0
+    },
+    {
+      "id": 3,
+      "item_id": 24,
+      "source": "VF EXTINSAN LTDA",
+      "quote_date": "10 de Dezembro de 2025",
+      "unit_price": 53,
+      "quote_type": "private",
+      "is_outlier": 0
+    },
+    {
+      "id": 4,
+      "item_id": 25,
+      "source": "NETO EQUIPAMENTOS",
+      "quote_date": "10 de Dezembro de 2025",
+      "unit_price": 80,
+      "quote_type": "private",
+      "is_outlier": 0
+    },
+    {
+      "id": 5,
+      "item_id": 25,
+      "source": "EXTINSAN EXTINTORES LTDA",
+      "quote_date": "10 de Dezembro de 2025",
+      "unit_price": 70,
+      "quote_type": "private",
+      "is_outlier": 0
+    },
+    {
+      "id": 6,
+      "item_id": 25,
+      "source": "VF EXTINSAN LTDA",
+      "quote_date": "10 de Dezembro de 2025",
+      "unit_price": 95,
+      "quote_type": "private",
+      "is_outlier": 0
+    },
+    {
+      "id": 7,
+      "item_id": 26,
+      "source": "NETO EQUIPAMENTOS",
+      "quote_date": "10 de Dezembro de 2025",
+      "unit_price": 45,
+      "quote_type": "private",
+      "is_outlier": 0
+    },
+    {
+      "id": 8,
+      "item_id": 26,
+      "source": "EXTINSAN EXTINTORES LTDA",
+      "quote_date": "10 de Dezembro de 2025",
+      "unit_price": 35,
+      "quote_type": "private",
+      "is_outlier": 0
+    },
+    {
+      "id": 9,
+      "item_id": 26,
+      "source": "VF EXTINSAN LTDA",
+      "quote_date": "10 de Dezembro de 2025",
+      "unit_price": 50,
+      "quote_type": "private",
+      "is_outlier": 0
+    },
+    {
+      "id": 10,
+      "item_id": 24,
+      "source": "FUNDO MUNICIPAL DE ASSISTENCIA SOCIAL DE LINHARES- FMAS / 15183636000193-004 - FUNDO MUNICIPAL DE ASSISTENCIA SOCIAL",
+      "quote_date": "2025-12-03",
+      "unit_price": 61.5,
+      "quote_type": "public",
+      "is_outlier": 0
+    },
+    {
+      "id": 11,
+      "item_id": 24,
+      "source": "MUNICIPIO DE ITAGUACU / 27167451000174-001 - Prefeitura Municipal de Itaguaçu",
+      "quote_date": "2025-11-07",
+      "unit_price": 130,
+      "quote_type": "public",
+      "is_outlier": 0
+    },
+    {
+      "id": 12,
+      "item_id": 24,
+      "source": "27.167.444/0001-72 - MUNICIPIO DE SANTA TERESA / 27167444000172-001 - Prefeitura Municipal de Santa Teresa",
+      "quote_date": "2025-07-07",
+      "unit_price": 60,
+      "quote_type": "public",
+      "is_outlier": 0
+    },
+    {
+      "id": 13,
+      "item_id": 26,
+      "source": "MUNICIPIO DE SAO JOSE DOS CAMPOS / 020 - SECRETARIA DE GESTAO ADMINISTRATIVA E FINANCAS",
+      "quote_date": "2025-10-02",
+      "unit_price": 96,
+      "quote_type": "public",
+      "is_outlier": 0
+    },
+    {
+      "id": 14,
+      "item_id": 26,
+      "source": "MUNICIPIO DE SAO JOSE DOS CAMPOS / 020 - SECRETARIA DE GESTAO ADMINISTRATIVA E FINANCAS",
+      "quote_date": "2025-09-04",
+      "unit_price": 140,
+      "quote_type": "public",
+      "is_outlier": 0
+    },
+    {
+      "id": 15,
+      "item_id": 26,
+      "source": "PREF MUNIC VALENTIM GENTIL",
+      "quote_date": "2025 00:00:00-11-03",
+      "unit_price": 75,
+      "quote_type": "public",
+      "is_outlier": 0
+    }
+  ]
+}

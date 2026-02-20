@@ -68,10 +68,35 @@ export const formatCurrency = (value: number) => {
 
 export const formatDate = (dateString: string) => {
   if (!dateString) return '-';
-  // Se a string estiver apenas no formato YYYY-MM-DD, tratamos para evitar problemas de fuso horário
+  
+  // Tratar formato "DD de Mês de YYYY" (comum em colagens de texto)
+  const portugueseMonths: { [key: string]: string } = {
+    janeiro: '01', fevereiro: '02', 'março': '03', abril: '04', maio: '05', junho: '06',
+    julho: '07', agosto: '08', setembro: '09', outubro: '10', novembro: '11', dezembro: '12'
+  };
+
+  let normalized = dateString.toLowerCase();
+  for (const [month, num] of Object.entries(portugueseMonths)) {
+    if (normalized.includes(month)) {
+      normalized = normalized.replace(/ de /g, ' ').replace(month, num).trim();
+      // "10 12 2025" -> "2025-12-10"
+      const parts = normalized.split(' ');
+      if (parts.length === 3) {
+        return `${parts[0].padStart(2, '0')}/${parts[1]}/${parts[2]}`;
+      }
+    }
+  }
+
+  // Se a string estiver apenas no formato YYYY-MM-DD
   if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
     const [year, month, day] = dateString.split('-').map(Number);
     return new Date(year, month - 1, day).toLocaleDateString('pt-BR');
   }
-  return new Date(dateString).toLocaleDateString('pt-BR');
+
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) {
+    return dateString; // Retorna o texto original se não for uma data válida
+  }
+
+  return date.toLocaleDateString('pt-BR');
 };
