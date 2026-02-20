@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Process, Item, Quote, Stats } from './types';
-import { calculateStats, formatCurrency, formatDate } from './utils';
+import { calculateStats, formatCurrency, formatDate, getQuoteExpiryStatus } from './utils';
 
 // --- Components ---
 
@@ -85,7 +85,7 @@ export default function App() {
 
   // Form states
   const [showProcessModal, setShowProcessModal] = useState(false);
-  const [newProcess, setNewProcess] = useState({ process_number: '', object: '' });
+  const [newProcess, setNewProcess] = useState({ process_number: '', object: '', pricing_strategy: 'sanitized' as const });
   
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [showItemModal, setShowItemModal] = useState(false);
@@ -167,10 +167,23 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newProcess)
       });
-      const data = await res.json();
+      await res.json();
       fetchProcesses();
       setShowProcessModal(false);
-      setNewProcess({ process_number: '', object: '' });
+      setNewProcess({ process_number: '', object: '', pricing_strategy: 'sanitized' });
+    } catch (e) { console.error(e); }
+  };
+
+  const handleUpdateProcessStrategy = async (strategy: 'sanitized' | 'mean' | 'median') => {
+    if (!selectedProcess) return;
+    const updated = { ...selectedProcess, pricing_strategy: strategy };
+    try {
+      await fetch(`/api/processes/${selectedProcess.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated)
+      });
+      setSelectedProcess(updated);
     } catch (e) { console.error(e); }
   };
 
@@ -240,6 +253,8 @@ export default function App() {
   };
 
   if (view === 'export' && selectedProcess) {
+    const globalStrategy = selectedProcess.pricing_strategy;
+
     return (
       <div className="min-h-screen bg-white p-4 max-w-[1600px] mx-auto overflow-x-auto">
         <div className="flex justify-between items-center mb-8 no-print">
@@ -247,15 +262,12 @@ export default function App() {
             <ArrowLeft size={18} /> Voltar
           </Button>
           <div className="flex gap-4 items-center">
-            <span className="text-sm font-bold text-slate-500">Configuração Global:</span>
+            <span className="text-sm font-bold text-slate-500">Estratégia do Processo:</span>
             <select 
-              className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm"
-              onChange={(e) => {
-                const strategy = e.target.value as any;
-                setItems(items.map(it => ({ ...it, pricing_strategy: strategy })));
-              }}
+              className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold"
+              value={globalStrategy}
+              onChange={(e) => handleUpdateProcessStrategy(e.target.value as any)}
             >
-              <option value="">Alterar todos para...</option>
               <option value="sanitized">Média Saneada</option>
               <option value="mean">Média Comum</option>
               <option value="median">Mediana</option>
@@ -289,17 +301,17 @@ export default function App() {
               </th>
               
               {/* Conditional Columns based on strategy */}
-              {(items.some(it => it.pricing_strategy === 'median' || it.pricing_strategy === 'sanitized')) && (
+              {(globalStrategy === 'median' || globalStrategy === 'sanitized') && (
                 <th className="border border-slate-800 p-1">Menor Valor Unitário</th>
               )}
               
               <th className="border border-slate-800 p-1">Média (Unitário)</th>
               
-              {(items.some(it => it.pricing_strategy === 'median' || it.pricing_strategy === 'sanitized')) && (
+              {(globalStrategy === 'median' || globalStrategy === 'sanitized') && (
                 <th className="border border-slate-800 p-1">Mediana (Unitário)</th>
               )}
 
-              {(items.some(it => it.pricing_strategy === 'sanitized')) && (
+              {(globalStrategy === 'sanitized') && (
                 <>
                   <th className="border border-slate-800 p-1">Desvio Padrão</th>
                   <th className="border border-slate-800 p-1">CV (%)</th>
@@ -318,9 +330,9 @@ export default function App() {
               const stats = calculateStats(itemQuotes, item.quantity);
               const rowCount = Math.max(1, itemQuotes.length);
               
-              const isSanitized = item.pricing_strategy === 'sanitized';
-              const isMedian = item.pricing_strategy === 'median';
-              const isMean = item.pricing_strategy === 'mean';
+              const isSanitized = globalStrategy === 'sanitized';
+              const isMedian = globalStrategy === 'median';
+              const isMean = globalStrategy === 'mean';
 
               let finalUnitValue = stats.sanitizedMean;
               if (isMean) finalUnitValue = stats.mean;
@@ -354,9 +366,9 @@ export default function App() {
 
                       {idx === 0 && (
                         <>
-                          {(items.some(it => it.pricing_strategy === 'median' || it.pricing_strategy === 'sanitized')) && (
+                          {(globalStrategy === 'median' || globalStrategy === 'sanitized') && (
                             <td className="border border-slate-800 p-1 text-right font-mono" rowSpan={rowCount}>
-                              {isMedian || isSanitized ? formatCurrency(stats.min) : '-'}
+                              {formatCurrency(stats.min)}
                             </td>
                           )}
                           
@@ -364,28 +376,28 @@ export default function App() {
                             {formatCurrency(stats.mean)}
                           </td>
                           
-                          {(items.some(it => it.pricing_strategy === 'median' || it.pricing_strategy === 'sanitized')) && (
+                          {(globalStrategy === 'median' || globalStrategy === 'sanitized') && (
                             <td className="border border-slate-800 p-1 text-right font-mono" rowSpan={rowCount}>
-                              {isMedian || isSanitized ? formatCurrency(stats.median) : '-'}
+                              {formatCurrency(stats.median)}
                             </td>
                           )}
 
-                          {(items.some(it => it.pricing_strategy === 'sanitized')) && (
+                          {(globalStrategy === 'sanitized') && (
                             <>
                               <td className="border border-slate-800 p-1 text-right font-mono" rowSpan={rowCount}>
-                                {isSanitized ? formatCurrency(stats.stdDev) : '-'}
+                                {formatCurrency(stats.stdDev)}
                               </td>
                               <td className="border border-slate-800 p-1 text-center font-mono" rowSpan={rowCount}>
-                                {isSanitized ? `${stats.cv.toFixed(2)}%` : '-'}
+                                {`${stats.cv.toFixed(2)}%`}
                               </td>
                               <td className="border border-slate-800 p-1 text-right font-mono" rowSpan={rowCount}>
-                                {isSanitized ? formatCurrency(stats.lowerLimit) : '-'}
+                                {formatCurrency(stats.lowerLimit)}
                               </td>
                               <td className="border border-slate-800 p-1 text-right font-mono" rowSpan={rowCount}>
-                                {isSanitized ? formatCurrency(stats.upperLimit) : '-'}
+                                {formatCurrency(stats.upperLimit)}
                               </td>
                               <td className="border border-slate-800 p-1 text-right font-mono" rowSpan={rowCount}>
-                                {isSanitized ? formatCurrency(stats.sanitizedMean) : '-'}
+                                {formatCurrency(stats.sanitizedMean)}
                               </td>
                             </>
                           )}
@@ -403,7 +415,7 @@ export default function App() {
           </tbody>
           <tfoot>
             <tr className="bg-slate-900 text-white font-bold uppercase">
-              <td colSpan={items.some(it => it.pricing_strategy === 'sanitized') ? 15 : (items.some(it => it.pricing_strategy === 'median') ? 10 : 8)} className="border border-slate-800 p-2 text-right">
+              <td colSpan={globalStrategy === 'sanitized' ? 15 : (globalStrategy === 'median' ? 10 : 8)} className="border border-slate-800 p-2 text-right">
                 Valor Total da Pesquisa:
               </td>
               <td className="border border-slate-800 p-2 text-right font-mono text-sm">
@@ -411,8 +423,8 @@ export default function App() {
                   const itemQuotes = quotes[item.id] || [];
                   const stats = calculateStats(itemQuotes, item.quantity);
                   let val = stats.sanitizedMean;
-                  if (item.pricing_strategy === 'mean') val = stats.mean;
-                  if (item.pricing_strategy === 'median') val = stats.median;
+                  if (globalStrategy === 'mean') val = stats.mean;
+                  if (globalStrategy === 'median') val = stats.median;
                   return acc + (val * item.quantity);
                 }, 0))}
               </td>
@@ -588,6 +600,18 @@ export default function App() {
                   <h2 className="text-2xl font-bold tracking-tight">{selectedProcess?.process_number}</h2>
                   <p className="text-sm text-slate-500 truncate max-w-md">{selectedProcess?.object}</p>
                 </div>
+                <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 ml-4">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Estratégia:</span>
+                  <select
+                    className="text-sm font-bold focus:outline-none bg-transparent cursor-pointer"
+                    value={selectedProcess?.pricing_strategy}
+                    onChange={(e) => handleUpdateProcessStrategy(e.target.value as any)}
+                  >
+                    <option value="sanitized">Média Saneada</option>
+                    <option value="mean">Média Comum</option>
+                    <option value="median">Mediana</option>
+                  </select>
+                </div>
                 <div className="ml-auto flex gap-3">
                   <Button variant="secondary" onClick={() => setView('export')}>
                     <FileText size={18} /> Ver Mapa Final
@@ -604,6 +628,12 @@ export default function App() {
                   const stats = calculateStats(itemQuotes, item.quantity);
                   const hasHighCV = stats.cv > 25;
 
+                  const strategy = selectedProcess?.pricing_strategy || 'sanitized';
+                  let finalUnitValue = stats.sanitizedMean;
+                  if (strategy === 'mean') finalUnitValue = stats.mean;
+                  if (strategy === 'median') finalUnitValue = stats.median;
+                  const totalEstimated = finalUnitValue * item.quantity;
+
                   return (
                     <Card key={item.id} className="border-l-4 border-l-slate-900">
                       <div className="p-6">
@@ -617,8 +647,8 @@ export default function App() {
                               <div className="flex items-center gap-4 text-sm text-slate-500">
                                 <span className="flex items-center gap-1"><Package size={14} /> {item.quantity} {item.unit}</span>
                                 <span className="flex items-center gap-1"><Calculator size={14} /> {itemQuotes.length} cotações</span>
-                                <span className="text-xs bg-slate-100 px-2 py-0.5 rounded font-semibold uppercase">
-                                  {item.pricing_strategy === 'sanitized' ? 'Média Saneada' : item.pricing_strategy === 'mean' ? 'Média Comum' : 'Mediana'}
+                                <span className="text-xs bg-slate-900 text-white px-2 py-0.5 rounded font-semibold uppercase">
+                                  {strategy === 'sanitized' ? 'Média Saneada' : strategy === 'mean' ? 'Média Comum' : 'Mediana'}
                                 </span>
                               </div>
                             </div>
@@ -662,8 +692,24 @@ export default function App() {
                             <div className="space-y-2">
                               {itemQuotes.map((q) => {
                                 const isOutlier = q.unit_price < stats.lowerLimit || q.unit_price > stats.upperLimit;
+                                const expiryStatus = getQuoteExpiryStatus(q);
+
+                                const expiryStyles = {
+                                  expired: 'bg-red-500 text-white',
+                                  warning: 'bg-orange-500 text-white',
+                                  attention: 'bg-amber-400 text-white',
+                                  valid: 'bg-slate-200 text-slate-600'
+                                };
+
+                                const expiryLabels = {
+                                  expired: 'Vencida',
+                                  warning: 'Expira < 15d',
+                                  attention: 'Expira < 30d',
+                                  valid: q.quote_type === 'public' ? 'Pública' : 'Privada'
+                                };
+
                                 return (
-                                  <div key={q.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100 group">
+                                  <div key={q.id} className={`flex items-center justify-between p-3 rounded-xl border group transition-all ${expiryStatus === 'expired' ? 'bg-red-50 border-red-100' : 'bg-slate-50 border-slate-100'}`}>
                                     <div className="flex items-center gap-4">
                                       <div className={`w-2 h-2 rounded-full ${isOutlier ? 'bg-red-400' : 'bg-emerald-400'}`} />
                                       <div className="cursor-pointer" onClick={() => {
@@ -676,12 +722,19 @@ export default function App() {
                                         });
                                         setShowQuoteModal(item.id);
                                       }}>
-                                        <p className="font-semibold text-sm hover:text-emerald-600 transition-colors">{q.source}</p>
+                                        <div className="flex items-center gap-2">
+                                          <p className="font-semibold text-sm hover:text-emerald-600 transition-colors">{q.source}</p>
+                                        </div>
                                         <div className="flex items-center gap-2">
                                           <p className="text-[10px] text-slate-400 uppercase">{formatDate(q.quote_date)}</p>
                                           <span className={`text-[8px] px-1 rounded font-bold uppercase ${q.quote_type === 'public' ? 'bg-blue-50 text-blue-600' : 'bg-slate-200 text-slate-600'}`}>
                                             {q.quote_type === 'public' ? 'Pública' : 'Privada'}
                                           </span>
+                                          {expiryStatus !== 'valid' && (
+                                            <span className={`text-[8px] px-1.5 py-0.5 rounded-full font-bold uppercase shadow-sm ${expiryStyles[expiryStatus]}`}>
+                                              {expiryLabels[expiryStatus]}
+                                            </span>
+                                          )}
                                         </div>
                                       </div>
                                     </div>
@@ -717,8 +770,8 @@ export default function App() {
                               
                               <div className="space-y-4">
                                 <div className="flex justify-between items-end">
-                                  <span className="text-xs text-slate-400">Média Saneada</span>
-                                  <span className="font-mono font-bold">{formatCurrency(stats.sanitizedMean)}</span>
+                                  <span className="text-xs text-slate-400">{strategy === 'sanitized' ? 'Média Saneada' : strategy === 'mean' ? 'Média Comum' : 'Mediana'}</span>
+                                  <span className="font-mono font-bold">{formatCurrency(finalUnitValue)}</span>
                                 </div>
                                 <div className="flex justify-between items-end">
                                   <span className="text-xs text-slate-400">Coef. Variação</span>
@@ -730,12 +783,20 @@ export default function App() {
                                   <span className="text-xs text-slate-400">Amostras Válidas</span>
                                   <span className="font-mono font-bold">{stats.validQuotes} / {itemQuotes.length}</span>
                                 </div>
+                                <div className="flex justify-between items-end border-t border-white/5 pt-2">
+                                  <span className="text-xs text-slate-400">Limite Inferior</span>
+                                  <span className="font-mono text-[10px] text-slate-300">{formatCurrency(stats.lowerLimit)}</span>
+                                </div>
+                                <div className="flex justify-between items-end">
+                                  <span className="text-xs text-slate-400">Limite Superior</span>
+                                  <span className="font-mono text-[10px] text-slate-300">{formatCurrency(stats.upperLimit)}</span>
+                                </div>
                               </div>
                             </div>
 
                             <div className="mt-8 pt-6 border-t border-white/10">
                               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Total Estimado</p>
-                              <p className="text-3xl font-bold font-mono tracking-tighter">{formatCurrency(stats.totalEstimated)}</p>
+                              <p className="text-3xl font-bold font-mono tracking-tighter">{formatCurrency(totalEstimated)}</p>
                               
                               {hasHighCV && (
                                 <div className="mt-4 flex items-center gap-2 text-orange-400 bg-orange-400/10 p-2 rounded-lg text-[10px] font-bold uppercase">
@@ -785,6 +846,18 @@ export default function App() {
                   value={newProcess.process_number}
                   onChange={e => setNewProcess({...newProcess, process_number: e.target.value})}
                 />
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Estratégia de Preço Padrão</label>
+                  <select
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all"
+                    value={newProcess.pricing_strategy}
+                    onChange={e => setNewProcess({...newProcess, pricing_strategy: e.target.value as any})}
+                  >
+                    <option value="sanitized">Média Saneada</option>
+                    <option value="mean">Média Comum</option>
+                    <option value="median">Mediana</option>
+                  </select>
+                </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Objeto da Contratação</label>
                   <textarea 
@@ -845,18 +918,6 @@ export default function App() {
                   value={newItem.quantity}
                   onChange={e => setNewItem({...newItem, quantity: parseFloat(e.target.value)})}
                 />
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Estratégia de Preço</label>
-                  <select 
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all"
-                    value={newItem.pricing_strategy}
-                    onChange={e => setNewItem({...newItem, pricing_strategy: e.target.value as any})}
-                  >
-                    <option value="sanitized">Média Saneada</option>
-                    <option value="mean">Média Comum</option>
-                    <option value="median">Mediana</option>
-                  </select>
-                </div>
                 <div className="flex gap-3 pt-4">
                   <Button variant="secondary" className="flex-1" onClick={() => { setShowItemModal(false); setEditingItem(null); }}>Cancelar</Button>
                   <Button type="submit" className="flex-1">Salvar Item</Button>

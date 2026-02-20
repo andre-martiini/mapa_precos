@@ -15,9 +15,19 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     process_number TEXT NOT NULL,
     object TEXT NOT NULL,
+    pricing_strategy TEXT DEFAULT 'sanitized',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+`);
 
+// Migration for existing database
+try {
+  db.prepare("ALTER TABLE processes ADD COLUMN pricing_strategy TEXT DEFAULT 'sanitized'").run();
+} catch (e) {
+  // Column might already exist
+}
+
+db.exec(`
   CREATE TABLE IF NOT EXISTS items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     process_id INTEGER NOT NULL,
@@ -68,11 +78,24 @@ async function startServer() {
 
   app.post("/api/processes", (req, res) => {
     try {
-      const { process_number, object } = req.body;
-      const result = db.prepare("INSERT INTO processes (process_number, object) VALUES (?, ?)").run(process_number, object);
+      const { process_number, object, pricing_strategy } = req.body;
+      const result = db.prepare("INSERT INTO processes (process_number, object, pricing_strategy) VALUES (?, ?, ?)")
+        .run(process_number, object, pricing_strategy || 'sanitized');
       res.json({ id: result.lastInsertRowid });
     } catch (error) {
       console.error("Error creating process:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
+  app.put("/api/processes/:id", (req, res) => {
+    try {
+      const { process_number, object, pricing_strategy } = req.body;
+      db.prepare("UPDATE processes SET process_number = ?, object = ?, pricing_strategy = ? WHERE id = ?")
+        .run(process_number, object, pricing_strategy, req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error updating process:", error);
       res.status(500).json({ error: "Internal Server Error" });
     }
   });

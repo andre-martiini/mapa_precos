@@ -49,14 +49,25 @@ export function calculateStats(quotes: Quote[], quantity: number): Stats {
   };
 }
 
-export function isQuoteExpired(quote: Quote): boolean {
+export type ExpiryStatus = 'expired' | 'warning' | 'attention' | 'valid';
+
+export function getQuoteExpiryStatus(quote: Quote): ExpiryStatus {
   const now = new Date();
   const quoteDate = new Date(quote.quote_date);
-  const diffTime = Math.abs(now.getTime() - quoteDate.getTime());
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  // Reset hours to compare only dates
+  now.setHours(0, 0, 0, 0);
+  quoteDate.setHours(0, 0, 0, 0);
+
+  const diffTime = now.getTime() - quoteDate.getTime();
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
   
   const limit = quote.quote_type === 'public' ? 360 : 180;
-  return diffDays > limit;
+  const daysRemaining = limit - diffDays;
+
+  if (daysRemaining <= 0) return 'expired';
+  if (daysRemaining <= 15) return 'warning';
+  if (daysRemaining <= 30) return 'attention';
+  return 'valid';
 }
 
 export const formatCurrency = (value: number) => {
