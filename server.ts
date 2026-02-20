@@ -66,6 +66,23 @@ async function startServer() {
     }
   });
 
+  app.post("/api/items/reorder", (req, res) => {
+    try {
+      const { items } = req.body; // Array of { id, item_number }
+      const updateStmt = db.prepare("UPDATE items SET item_number = ? WHERE id = ?");
+      const transaction = db.transaction((items) => {
+        for (const item of items) {
+          updateStmt.run(item.item_number, item.id);
+        }
+      });
+      transaction(items);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error reordering items:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
   app.post("/api/processes", (req, res) => {
     try {
       const { process_number, object } = req.body;

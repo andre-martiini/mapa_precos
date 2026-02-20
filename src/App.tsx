@@ -7,15 +7,20 @@ import {
   TrendingUp, 
   AlertTriangle, 
   ChevronRight, 
+  ChevronLeft,
+  ChevronDown,
+  ChevronUp,
+  GripVertical,
   Search,
   ArrowLeft,
   Download,
   Copy,
   LayoutDashboard,
   Package,
-  History
+  History,
+  Menu
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, Reorder } from 'motion/react';
 import { Process, Item, Quote, Stats } from './types';
 import { calculateStats, formatCurrency, formatDate } from './utils';
 
@@ -62,20 +67,26 @@ const Button = ({
   );
 };
 
-const Input = ({ label, ...props }: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) => (
-  <div className="space-y-1.5">
-    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{label}</label>
-    <input 
-      {...props}
-      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all"
-    />
-  </div>
-);
+const Input = ({ label, id, ...props }: { label: string, id?: string } & React.InputHTMLAttributes<HTMLInputElement>) => {
+  const inputId = id || label.toLowerCase().replace(/\s+/g, '-');
+  return (
+    <div className="space-y-1.5">
+      <label htmlFor={inputId} className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{label}</label>
+      <input
+        id={inputId}
+        {...props}
+        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all"
+      />
+    </div>
+  );
+};
 
 // --- Main App ---
 
 export default function App() {
   const [view, setView] = useState<'dashboard' | 'process' | 'export' | 'history'>('dashboard');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [expandedItems, setExpandedItems] = useState<Record<number, boolean>>({});
   const [processes, setProcesses] = useState<Process[]>([]);
   const [historyItems, setHistoryItems] = useState<(Item & { process_number: string, object: string })[]>([]);
   const [selectedProcess, setSelectedProcess] = useState<Process | null>(null);
@@ -218,8 +229,29 @@ export default function App() {
       fetchProcessDetails(selectedProcess);
       setShowQuoteModal(null);
       setEditingQuote(null);
-      setNewQuote({ source: '', quote_date: new Date().toISOString().split('T')[0], unit_price: 0, quote_type: 'private' });
+      setNewQuote({ ...newQuote, unit_price: 0 }); // Retain source and date
     } catch (e) { console.error(e); }
+  };
+
+  const handleReorder = async (newItems: Item[]) => {
+    const updatedItems = newItems.map((it, idx) => ({ ...it, item_number: idx + 1 }));
+    setItems(updatedItems);
+    try {
+      await fetch('/api/items/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: updatedItems.map(it => ({ id: it.id, item_number: it.item_number }))
+        })
+      });
+    } catch (e) { console.error(e); }
+  };
+
+  const toggleItemExpansion = (itemId: number) => {
+    setExpandedItems(prev => ({
+      ...prev,
+      [itemId]: prev[itemId] === undefined ? false : !prev[itemId]
+    }));
   };
 
   const handleDeleteProcess = async (id: number) => {
@@ -437,38 +469,56 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
       {/* Sidebar */}
-      <aside className="fixed left-0 top-0 h-full w-64 bg-slate-900 text-white p-6 z-20 hidden md:block">
-        <div className="flex items-center gap-3 mb-12">
-          <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center">
+      <aside className={`fixed left-0 top-0 h-full bg-slate-900 text-white transition-all duration-300 z-20 hidden md:flex flex-col ${sidebarCollapsed ? 'w-20 p-4' : 'w-64 p-6'}`}>
+        <div className={`flex items-center gap-3 mb-12 ${sidebarCollapsed ? 'justify-center' : ''}`}>
+          <div className="min-w-10 w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center shrink-0">
             <TrendingUp className="text-white" size={24} />
           </div>
-          <h1 className="font-bold text-xl tracking-tight">MapaPro</h1>
+          {!sidebarCollapsed && (
+            <motion.h1
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="font-bold text-xl tracking-tight whitespace-nowrap"
+            >
+              MapaPro
+            </motion.h1>
+          )}
         </div>
 
-        <nav className="space-y-2">
+        <nav className="space-y-2 flex-1">
           <button 
             onClick={() => setView('dashboard')}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${view === 'dashboard' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
+            title={sidebarCollapsed ? "Dashboard" : ""}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${view === 'dashboard' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white hover:bg-white/5'} ${sidebarCollapsed ? 'justify-center px-0' : ''}`}
           >
-            <LayoutDashboard size={20} />
-            Dashboard
+            <LayoutDashboard size={20} className="shrink-0" />
+            {!sidebarCollapsed && <span>Dashboard</span>}
           </button>
           <button 
             onClick={fetchHistory}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${view === 'history' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
+            title={sidebarCollapsed ? "Histórico" : ""}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${view === 'history' ? 'bg-white/10 text-white' : 'text-slate-400 hover:text-white hover:bg-white/5'} ${sidebarCollapsed ? 'justify-center px-0' : ''}`}
           >
-            <History size={20} />
-            Histórico
+            <History size={20} className="shrink-0" />
+            {!sidebarCollapsed && <span>Histórico</span>}
           </button>
         </nav>
 
-        <div className="absolute bottom-8 left-6 right-6">
-          {/* Version removed as requested */}
-        </div>
+        <button
+          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+          className="mt-auto flex items-center justify-center w-full py-3 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 transition-all"
+        >
+          {sidebarCollapsed ? <ChevronRight size={20} /> : (
+            <div className="flex items-center gap-3 w-full px-4">
+              <ChevronLeft size={20} />
+              <span>Recolher</span>
+            </div>
+          )}
+        </button>
       </aside>
 
       {/* Main Content */}
-      <main className="md:ml-64 p-8">
+      <main className={`transition-all duration-300 p-8 ${sidebarCollapsed ? 'md:ml-20' : 'md:ml-64'}`}>
         <AnimatePresence mode="wait">
           {view === 'dashboard' ? (
             <motion.div 
@@ -598,157 +648,186 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="space-y-8">
+              <Reorder.Group axis="y" values={items} onReorder={handleReorder} className="space-y-8">
                 {items.map((item) => {
                   const itemQuotes = quotes[item.id] || [];
                   const stats = calculateStats(itemQuotes, item.quantity);
                   const hasHighCV = stats.cv > 25;
+                  const isExpanded = expandedItems[item.id] !== false;
 
                   return (
-                    <Card key={item.id} className="border-l-4 border-l-slate-900">
-                      <div className="p-6">
-                        <div className="flex justify-between items-start mb-6">
-                          <div className="flex gap-4">
-                            <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center font-bold text-slate-600">
-                              {item.item_number}
-                            </div>
-                            <div>
-                              <h3 className="text-xl font-bold mb-1">{item.specification}</h3>
-                              <div className="flex items-center gap-4 text-sm text-slate-500">
-                                <span className="flex items-center gap-1"><Package size={14} /> {item.quantity} {item.unit}</span>
-                                <span className="flex items-center gap-1"><Calculator size={14} /> {itemQuotes.length} cotações</span>
-                                <span className="text-xs bg-slate-100 px-2 py-0.5 rounded font-semibold uppercase">
-                                  {item.pricing_strategy === 'sanitized' ? 'Média Saneada' : item.pricing_strategy === 'mean' ? 'Média Comum' : 'Mediana'}
-                                </span>
+                    <Reorder.Item
+                      key={item.id}
+                      value={item}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="relative"
+                    >
+                      <Card className={`border-l-4 border-l-slate-900 overflow-visible ${!isExpanded ? 'bg-slate-50/50' : ''}`}>
+                        <div className="p-6">
+                          <div className="flex justify-between items-start">
+                            <div className="flex gap-4">
+                              <div className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-400 mt-1">
+                                <GripVertical size={20} />
                               </div>
-                            </div>
-                          </div>
-                          <div className="flex gap-2">
-                            <Button variant="ghost" onClick={() => {
-                              setEditingItem(item);
-                              setNewItem({ 
-                                item_number: item.item_number, 
-                                specification: item.specification, 
-                                unit: item.unit, 
-                                quantity: item.quantity,
-                                pricing_strategy: item.pricing_strategy
-                              });
-                              setShowItemModal(true);
-                            }}>
-                              <Copy size={18} className="text-slate-400" />
-                            </Button>
-                            <Button variant="ghost" onClick={() => handleDeleteItem(item.id)}>
-                              <Trash2 size={18} className="text-red-400" />
-                            </Button>
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                          {/* Quotes List */}
-                          <div className="lg:col-span-2 space-y-4">
-                            <div className="flex justify-between items-center">
-                              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Cotações Coletadas</h4>
-                              <button 
-                                onClick={() => {
-                                  setEditingQuote(null);
-                                  setShowQuoteModal(item.id);
-                                }}
-                                className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
-                              >
-                                <Plus size={14} /> ADICIONAR PREÇO
-                              </button>
-                            </div>
-
-                            <div className="space-y-2">
-                              {itemQuotes.map((q) => {
-                                const isOutlier = q.unit_price < stats.lowerLimit || q.unit_price > stats.upperLimit;
-                                return (
-                                  <div key={q.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100 group">
-                                    <div className="flex items-center gap-4">
-                                      <div className={`w-2 h-2 rounded-full ${isOutlier ? 'bg-red-400' : 'bg-emerald-400'}`} />
-                                      <div className="cursor-pointer" onClick={() => {
-                                        setEditingQuote({ quote: q, itemId: item.id });
-                                        setNewQuote({
-                                          source: q.source,
-                                          quote_date: q.quote_date,
-                                          unit_price: q.unit_price,
-                                          quote_type: q.quote_type
-                                        });
-                                        setShowQuoteModal(item.id);
-                                      }}>
-                                        <p className="font-semibold text-sm hover:text-emerald-600 transition-colors">{q.source}</p>
-                                        <div className="flex items-center gap-2">
-                                          <p className="text-[10px] text-slate-400 uppercase">{formatDate(q.quote_date)}</p>
-                                          <span className={`text-[8px] px-1 rounded font-bold uppercase ${q.quote_type === 'public' ? 'bg-blue-50 text-blue-600' : 'bg-slate-200 text-slate-600'}`}>
-                                            {q.quote_type === 'public' ? 'Pública' : 'Privada'}
-                                          </span>
-                                        </div>
-                                      </div>
-                                    </div>
-                                    <div className="flex items-center gap-4">
-                                      <div className="text-right">
-                                        <p className={`font-mono font-bold ${isOutlier ? 'text-slate-400 line-through' : ''}`}>
-                                          {formatCurrency(q.unit_price)}
-                                        </p>
-                                        {isOutlier && <p className="text-[10px] text-red-500 font-bold uppercase">Outlier</p>}
-                                      </div>
-                                      <button 
-                                        onClick={() => handleDeleteQuote(q.id)}
-                                        className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-300 hover:text-red-500"
-                                      >
-                                        <Trash2 size={14} />
-                                      </button>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                              {itemQuotes.length === 0 && (
-                                <div className="py-8 text-center bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                                  <p className="text-sm text-slate-400">Nenhuma cotação inserida.</p>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Stats Panel */}
-                          <div className="bg-slate-900 text-white rounded-2xl p-6 flex flex-col justify-between">
-                            <div>
-                              <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-6">Análise Estatística</h4>
-                              
-                              <div className="space-y-4">
-                                <div className="flex justify-between items-end">
-                                  <span className="text-xs text-slate-400">Média Saneada</span>
-                                  <span className="font-mono font-bold">{formatCurrency(stats.sanitizedMean)}</span>
-                                </div>
-                                <div className="flex justify-between items-end">
-                                  <span className="text-xs text-slate-400">Coef. Variação</span>
-                                  <span className={`font-mono font-bold ${hasHighCV ? 'text-orange-400' : 'text-emerald-400'}`}>
-                                    {stats.cv.toFixed(2)}%
+                              <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center font-bold text-slate-600 shrink-0">
+                                {item.item_number}
+                              </div>
+                              <div>
+                                <h3 className="text-xl font-bold mb-1">{item.specification}</h3>
+                                <div className="flex items-center gap-4 text-sm text-slate-500">
+                                  <span className="flex items-center gap-1"><Package size={14} /> {item.quantity} {item.unit}</span>
+                                  <span className="flex items-center gap-1"><Calculator size={14} /> {itemQuotes.length} cotações</span>
+                                  <span className="text-xs bg-slate-100 px-2 py-0.5 rounded font-semibold uppercase">
+                                    {item.pricing_strategy === 'sanitized' ? 'Média Saneada' : item.pricing_strategy === 'mean' ? 'Média Comum' : 'Mediana'}
                                   </span>
                                 </div>
-                                <div className="flex justify-between items-end">
-                                  <span className="text-xs text-slate-400">Amostras Válidas</span>
-                                  <span className="font-mono font-bold">{stats.validQuotes} / {itemQuotes.length}</span>
-                                </div>
                               </div>
                             </div>
-
-                            <div className="mt-8 pt-6 border-t border-white/10">
-                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Total Estimado</p>
-                              <p className="text-3xl font-bold font-mono tracking-tighter">{formatCurrency(stats.totalEstimated)}</p>
-                              
-                              {hasHighCV && (
-                                <div className="mt-4 flex items-center gap-2 text-orange-400 bg-orange-400/10 p-2 rounded-lg text-[10px] font-bold uppercase">
-                                  <AlertTriangle size={14} /> CV Alto: Requer mais cotações
-                                </div>
-                              )}
+                            <div className="flex gap-2">
+                              <Button variant="ghost" onClick={() => toggleItemExpansion(item.id)}>
+                                {isExpanded ? <ChevronUp size={20} className="text-slate-400" /> : <ChevronDown size={20} className="text-slate-400" />}
+                              </Button>
+                              <Button variant="ghost" onClick={() => {
+                                setEditingItem(item);
+                                setNewItem({
+                                  item_number: item.item_number,
+                                  specification: item.specification,
+                                  unit: item.unit,
+                                  quantity: item.quantity,
+                                  pricing_strategy: item.pricing_strategy
+                                });
+                                setShowItemModal(true);
+                              }}>
+                                <Copy size={18} className="text-slate-400" />
+                              </Button>
+                              <Button variant="ghost" onClick={() => handleDeleteItem(item.id)}>
+                                <Trash2 size={18} className="text-red-400" />
+                              </Button>
                             </div>
                           </div>
+
+                          {isExpanded && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: 'auto' }}
+                              className="mt-8 grid grid-cols-1 lg:grid-cols-3 gap-8 overflow-hidden"
+                            >
+                              {/* Quotes List */}
+                              <div className="lg:col-span-2 space-y-4">
+                                <div className="flex justify-between items-center">
+                                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Cotações Coletadas</h4>
+                                  <button
+                                    onClick={() => {
+                                      setEditingQuote(null);
+                                      setShowQuoteModal(item.id);
+                                    }}
+                                    className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
+                                  >
+                                    <Plus size={14} /> ADICIONAR PREÇO
+                                  </button>
+                                </div>
+
+                                <div className="space-y-2">
+                                  {itemQuotes.map((q) => {
+                                    const isOutlier = q.unit_price < stats.lowerLimit || q.unit_price > stats.upperLimit;
+                                    return (
+                                      <div
+                                        key={q.id}
+                                        className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100 group cursor-pointer hover:border-emerald-200 transition-all"
+                                        onClick={() => {
+                                          setEditingQuote({ quote: q, itemId: item.id });
+                                          setNewQuote({
+                                            source: q.source,
+                                            quote_date: q.quote_date,
+                                            unit_price: q.unit_price,
+                                            quote_type: q.quote_type
+                                          });
+                                          setShowQuoteModal(item.id);
+                                        }}
+                                      >
+                                        <div className="flex items-center gap-4">
+                                          <div className={`w-2 h-2 rounded-full ${isOutlier ? 'bg-red-400' : 'bg-emerald-400'}`} />
+                                          <div>
+                                            <p className="font-semibold text-sm group-hover:text-emerald-600 transition-colors">{q.source}</p>
+                                            <div className="flex items-center gap-2">
+                                              <p className="text-[10px] text-slate-400 uppercase">{formatDate(q.quote_date)}</p>
+                                              <span className={`text-[8px] px-1 rounded font-bold uppercase ${q.quote_type === 'public' ? 'bg-blue-50 text-blue-600' : 'bg-slate-200 text-slate-600'}`}>
+                                                {q.quote_type === 'public' ? 'Pública' : 'Privada'}
+                                              </span>
+                                            </div>
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center gap-4">
+                                          <div className="text-right">
+                                            <p className={`font-mono font-bold ${isOutlier ? 'text-slate-400 line-through' : ''}`}>
+                                              {formatCurrency(q.unit_price)}
+                                            </p>
+                                            {isOutlier && <p className="text-[10px] text-red-500 font-bold uppercase">Outlier</p>}
+                                          </div>
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleDeleteQuote(q.id);
+                                            }}
+                                            className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-300 hover:text-red-500 p-2 hover:bg-red-50 rounded-lg"
+                                          >
+                                            <Trash2 size={14} />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                  {itemQuotes.length === 0 && (
+                                    <div className="py-8 text-center bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                                      <p className="text-sm text-slate-400">Nenhuma cotação inserida.</p>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Stats Panel */}
+                              <div className="bg-slate-900 text-white rounded-2xl p-6 flex flex-col justify-between">
+                                <div>
+                                  <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-6">Análise Estatística</h4>
+
+                                  <div className="space-y-4">
+                                    <div className="flex justify-between items-end">
+                                      <span className="text-xs text-slate-400">Média Saneada</span>
+                                      <span className="font-mono font-bold">{formatCurrency(stats.sanitizedMean)}</span>
+                                    </div>
+                                    <div className="flex justify-between items-end">
+                                      <span className="text-xs text-slate-400">Coef. Variação</span>
+                                      <span className={`font-mono font-bold ${hasHighCV ? 'text-orange-400' : 'text-emerald-400'}`}>
+                                        {stats.cv.toFixed(2)}%
+                                      </span>
+                                    </div>
+                                    <div className="flex justify-between items-end">
+                                      <span className="text-xs text-slate-400">Amostras Válidas</span>
+                                      <span className="font-mono font-bold">{stats.validQuotes} / {itemQuotes.length}</span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="mt-8 pt-6 border-t border-white/10">
+                                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Total Estimado</p>
+                                  <p className="text-3xl font-bold font-mono tracking-tighter">{formatCurrency(stats.totalEstimated)}</p>
+
+                                  {hasHighCV && (
+                                    <div className="mt-4 flex items-center gap-2 text-orange-400 bg-orange-400/10 p-2 rounded-lg text-[10px] font-bold uppercase">
+                                      <AlertTriangle size={14} /> CV Alto: Requer mais cotações
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </motion.div>
+                          )}
                         </div>
-                      </div>
-                    </Card>
+                      </Card>
+                    </Reorder.Item>
                   );
                 })}
+              </Reorder.Group>
 
                 {items.length === 0 && (
                   <div className="py-24 text-center bg-white rounded-3xl border border-slate-200">
@@ -760,7 +839,6 @@ export default function App() {
                     </Button>
                   </div>
                 )}
-              </div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -786,8 +864,9 @@ export default function App() {
                   onChange={e => setNewProcess({...newProcess, process_number: e.target.value})}
                 />
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Objeto da Contratação</label>
+                  <label htmlFor="process-object" className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Objeto da Contratação</label>
                   <textarea 
+                    id="process-object"
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all min-h-[100px]"
                     placeholder="Descreva o que está sendo contratado..."
                     required
