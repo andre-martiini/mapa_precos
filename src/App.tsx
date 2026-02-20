@@ -20,6 +20,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { Process, Item, Quote, Stats } from './types';
 import { calculateStats, formatCurrency, formatDate } from './utils';
+import { storage } from './storage';
 
 // --- Components ---
 
@@ -114,13 +115,7 @@ export default function App() {
 
   const fetchProcesses = async () => {
     try {
-      const res = await fetch('/api/processes');
-      if (!res.ok) {
-        const text = await res.text();
-        console.error(`Fetch error: ${res.status} ${res.statusText}`, text);
-        return;
-      }
-      const data = await res.json();
+      const data = await storage.getProcesses();
       setProcesses(data);
     } catch (e) {
       console.error("Fetch processes failed:", e);
@@ -132,13 +127,7 @@ export default function App() {
   const fetchHistory = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/history');
-      if (!res.ok) {
-        const text = await res.text();
-        console.error(`Fetch history error: ${res.status} ${res.statusText}`, text);
-        return;
-      }
-      const data = await res.json();
+      const data = await storage.getHistory();
       setHistoryItems(data);
       setView('history');
     } catch (e) {
@@ -151,16 +140,13 @@ export default function App() {
   const fetchProcessDetails = async (process: Process) => {
     setLoading(true);
     try {
-      const itemsRes = await fetch(`/api/processes/${process.id}/items`);
-      if (!itemsRes.ok) throw new Error(`Items fetch failed: ${itemsRes.status}`);
-      const itemsData: Item[] = await itemsRes.json();
+      const itemsData = await storage.getItems(process.id);
       setItems(itemsData);
       
       const quotesMap: Record<number, Quote[]> = {};
       for (const item of itemsData) {
-        const qRes = await fetch(`/api/items/${item.id}/quotes`);
-        if (!qRes.ok) throw new Error(`Quotes fetch failed for item ${item.id}: ${qRes.status}`);
-        quotesMap[item.id] = await qRes.json();
+        const itemQuotes = await storage.getQuotes(item.id);
+        quotesMap[item.id] = itemQuotes;
       }
       setQuotes(quotesMap);
       setSelectedProcess(process);
@@ -175,12 +161,7 @@ export default function App() {
   const handleCreateProcess = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('/api/processes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newProcess)
-      });
-      const data = await res.json();
+      await storage.createProcess(newProcess);
       fetchProcesses();
       setShowProcessModal(false);
       setNewProcess({ process_number: '', object: '' });
@@ -192,17 +173,9 @@ export default function App() {
     if (!selectedProcess) return;
     try {
       if (editingItem) {
-        await fetch(`/api/items/${editingItem.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newItem)
-        });
+        await storage.updateItem(editingItem.id, newItem);
       } else {
-        await fetch(`/api/processes/${selectedProcess.id}/items`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newItem)
-        });
+        await storage.createItem(selectedProcess.id, newItem);
       }
       fetchProcessDetails(selectedProcess);
       setShowItemModal(false);
@@ -249,17 +222,9 @@ export default function App() {
     if ((showQuoteModal === null && !editingQuote) || !selectedProcess) return;
     try {
       if (editingQuote) {
-        await fetch(`/api/quotes/${editingQuote.quote.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newQuote)
-        });
+        await storage.updateQuote(editingQuote.quote.id, newQuote);
       } else {
-        await fetch(`/api/items/${showQuoteModal}/quotes`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newQuote)
-        });
+        await storage.createQuote(showQuoteModal!, newQuote);
       }
       fetchProcessDetails(selectedProcess);
       setShowQuoteModal(null);
@@ -309,18 +274,18 @@ export default function App() {
 
   const handleDeleteProcess = async (id: number) => {
     if (!confirm('Deseja excluir este processo e todos os seus itens?')) return;
-    await fetch(`/api/processes/${id}`, { method: 'DELETE' });
+    await storage.deleteProcess(id);
     fetchProcesses();
   };
 
   const handleDeleteItem = async (id: number) => {
     if (!confirm('Deseja excluir este item?')) return;
-    await fetch(`/api/items/${id}`, { method: 'DELETE' });
+    await storage.deleteItem(id);
     if (selectedProcess) fetchProcessDetails(selectedProcess);
   };
 
   const handleDeleteQuote = async (id: number) => {
-    await fetch(`/api/quotes/${id}`, { method: 'DELETE' });
+    await storage.deleteQuote(id);
     if (selectedProcess) fetchProcessDetails(selectedProcess);
   };
 
@@ -360,41 +325,39 @@ export default function App() {
         <table className="w-full border-collapse border border-slate-800 text-[10px]">
           <thead>
             <tr className="bg-slate-100 uppercase font-bold text-center">
-              <th className="border border-slate-800 p-1 w-8">Item</th>
-              <th className="border border-slate-800 p-1 w-48">Especificação Sucinta</th>
-              <th className="border border-slate-800 p-1 w-12">UNID</th>
-              <th className="border border-slate-800 p-1 w-12">Quant</th>
-              <th className="border border-slate-800 p-0" colSpan={3}>
-                <div className="border-b border-slate-800 p-1">Preços</div>
-                <div className="grid grid-cols-3">
-                  <div className="p-1 border-r border-slate-800">Fornecedor</div>
-                  <div className="p-1 border-r border-slate-800">Data</div>
-                  <div className="p-1">Vlr. Unit.</div>
-                </div>
-              </th>
+              <th className="border border-slate-800 p-1 w-8" rowSpan={2}>Item</th>
+              <th className="border border-slate-800 p-1 w-48" rowSpan={2}>Especificação Sucinta</th>
+              <th className="border border-slate-800 p-1 w-12" rowSpan={2}>UNID</th>
+              <th className="border border-slate-800 p-1 w-12" rowSpan={2}>Quant</th>
+              <th className="border border-slate-800 p-1" colSpan={3}>Preços</th>
               
               {/* Conditional Columns based on strategy */}
               {(items.some(it => it.pricing_strategy === 'median' || it.pricing_strategy === 'sanitized')) && (
-                <th className="border border-slate-800 p-1">Menor Valor Unitário</th>
+                <th className="border border-slate-800 p-1" rowSpan={2}>Menor Valor Unitário</th>
               )}
               
-              <th className="border border-slate-800 p-1">Média (Unitário)</th>
+              <th className="border border-slate-800 p-1" rowSpan={2}>Média (Unitário)</th>
               
               {(items.some(it => it.pricing_strategy === 'median' || it.pricing_strategy === 'sanitized')) && (
-                <th className="border border-slate-800 p-1">Mediana (Unitário)</th>
+                <th className="border border-slate-800 p-1" rowSpan={2}>Mediana (Unitário)</th>
               )}
 
               {(items.some(it => it.pricing_strategy === 'sanitized')) && (
                 <>
-                  <th className="border border-slate-800 p-1">Desvio Padrão</th>
-                  <th className="border border-slate-800 p-1">CV (%)</th>
-                  <th className="border border-slate-800 p-1">Limite Inferior</th>
-                  <th className="border border-slate-800 p-1">Limite Superior</th>
-                  <th className="border border-slate-800 p-1">Média Saneada</th>
+                  <th className="border border-slate-800 p-1" rowSpan={2}>Desvio Padrão</th>
+                  <th className="border border-slate-800 p-1" rowSpan={2}>CV (%)</th>
+                  <th className="border border-slate-800 p-1" rowSpan={2}>Limite Inferior</th>
+                  <th className="border border-slate-800 p-1" rowSpan={2}>Limite Superior</th>
+                  <th className="border border-slate-800 p-1" rowSpan={2}>Média Saneada</th>
                 </>
               )}
               
-              <th className="border border-slate-800 p-1 bg-slate-200">Total Estimado</th>
+              <th className="border border-slate-800 p-1 bg-slate-200" rowSpan={2}>Total Estimado</th>
+            </tr>
+            <tr className="bg-slate-100 uppercase font-bold text-center">
+              <th className="border border-slate-800 p-1 min-w-[120px]">Fornecedor</th>
+              <th className="border border-slate-800 p-1">Data</th>
+              <th className="border border-slate-800 p-1">Vlr. Unit.</th>
             </tr>
           </thead>
           <tbody>
@@ -575,8 +538,12 @@ export default function App() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {processes.map((p) => (
-                  <Card key={p.id} className="group hover:border-slate-400 transition-all cursor-pointer" >
-                    <div className="p-6" onClick={() => fetchProcessDetails(p)}>
+                  <Card
+                    key={p.id}
+                    className="group hover:border-slate-400 transition-all cursor-pointer"
+                    onClick={() => fetchProcessDetails(p)}
+                  >
+                    <div className="p-6">
                       <div className="flex justify-between items-start mb-4">
                         <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded uppercase tracking-widest">
                           {p.process_number}
