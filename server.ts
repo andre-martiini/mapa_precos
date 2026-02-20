@@ -121,6 +121,23 @@ async function startServer() {
     }
   });
 
+  app.post("/api/processes/:id/items/batch", (req, res) => {
+    const insert = db.prepare("INSERT INTO items (process_id, item_number, specification, unit, quantity, pricing_strategy) VALUES (?, ?, ?, ?, ?, ?)");
+    const insertMany = db.transaction((processId, items) => {
+      for (const item of items) {
+        insert.run(processId, item.item_number, item.specification, item.unit, item.quantity, item.pricing_strategy || 'sanitized');
+      }
+    });
+
+    try {
+      insertMany(req.params.id, req.body.items);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error batch creating items:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
   app.put("/api/items/:id", (req, res) => {
     try {
       const { specification, unit, quantity, pricing_strategy, item_number } = req.body;
@@ -163,6 +180,23 @@ async function startServer() {
       res.json({ id: result.lastInsertRowid });
     } catch (error) {
       console.error("Error creating quote:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
+  app.post("/api/items/:id/quotes/batch", (req, res) => {
+    const insert = db.prepare("INSERT INTO quotes (item_id, source, quote_date, unit_price, quote_type) VALUES (?, ?, ?, ?, ?)");
+    const insertMany = db.transaction((itemId, quotes) => {
+      for (const quote of quotes) {
+        insert.run(itemId, quote.source, quote.quote_date, quote.unit_price, quote.quote_type || 'private');
+      }
+    });
+
+    try {
+      insertMany(req.params.id, req.body.quotes);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error batch creating quotes:", error);
       res.status(500).json({ error: "Internal Server Error" });
     }
   });

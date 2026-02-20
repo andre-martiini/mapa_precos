@@ -13,7 +13,9 @@ import {
   Copy,
   LayoutDashboard,
   Package,
-  History
+  History,
+  Pencil,
+  Table
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Process, Item, Quote, Stats } from './types';
@@ -55,6 +57,7 @@ const Button = ({
       type={type}
       disabled={disabled}
       onClick={onClick}
+      {...props}
       className={`px-4 py-2 rounded-lg font-medium transition-all inline-flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${className}`}
     >
       {children}
@@ -62,15 +65,19 @@ const Button = ({
   );
 };
 
-const Input = ({ label, ...props }: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) => (
-  <div className="space-y-1.5">
-    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{label}</label>
-    <input 
-      {...props}
-      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all"
-    />
-  </div>
-);
+const Input = ({ label, ...props }: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) => {
+  const id = React.useId();
+  return (
+    <div className="space-y-1.5">
+      <label htmlFor={id} className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{label}</label>
+      <input
+        id={id}
+        {...props}
+        className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all"
+      />
+    </div>
+  );
+};
 
 // --- Main App ---
 
@@ -90,6 +97,12 @@ export default function App() {
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [showItemModal, setShowItemModal] = useState(false);
   const [newItem, setNewItem] = useState({ item_number: 1, specification: '', unit: 'UN', quantity: 1, pricing_strategy: 'sanitized' as const });
+
+  const [showBatchItemModal, setShowBatchItemModal] = useState(false);
+  const [batchItemText, setBatchItemText] = useState('');
+
+  const [showBatchQuoteModal, setShowBatchQuoteModal] = useState<number | null>(null);
+  const [batchQuoteText, setBatchQuoteText] = useState('');
   
   const [editingQuote, setEditingQuote] = useState<{ quote: Quote, itemId: number } | null>(null);
   const [showQuoteModal, setShowQuoteModal] = useState<number | null>(null);
@@ -198,6 +211,39 @@ export default function App() {
     } catch (e) { console.error(e); }
   };
 
+  const handleBatchCreateItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProcess) return;
+
+    const lines = batchItemText.split('\n').filter(line => line.trim());
+    const newItems = lines.map((line, index) => {
+      const parts = line.split('\t');
+      // If not tab separated, try semi-colon (some CSVs)
+      const [spec, unit, qty] = parts.length >= 3 ? parts : line.split(';');
+
+      return {
+        item_number: items.length + index + 1,
+        specification: spec?.trim() || '',
+        unit: unit?.trim() || 'UN',
+        quantity: parseFloat(qty?.trim().replace(',', '.') || '0') || 0,
+        pricing_strategy: 'sanitized' as const
+      };
+    }).filter(it => it.specification);
+
+    if (newItems.length === 0) return;
+
+    try {
+      await fetch(`/api/processes/${selectedProcess.id}/items/batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: newItems })
+      });
+      fetchProcessDetails(selectedProcess);
+      setShowBatchItemModal(false);
+      setBatchItemText('');
+    } catch (e) { console.error(e); }
+  };
+
   const handleCreateQuote = async (e: React.FormEvent) => {
     e.preventDefault();
     if ((showQuoteModal === null && !editingQuote) || !selectedProcess) return;
@@ -219,6 +265,45 @@ export default function App() {
       setShowQuoteModal(null);
       setEditingQuote(null);
       setNewQuote({ source: '', quote_date: new Date().toISOString().split('T')[0], unit_price: 0, quote_type: 'private' });
+    } catch (e) { console.error(e); }
+  };
+
+  const handleBatchCreateQuote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (showBatchQuoteModal === null || !selectedProcess) return;
+
+    const lines = batchQuoteText.split('\n').filter(line => line.trim());
+    const newQuotes = lines.map(line => {
+      const parts = line.split('\t');
+      const [source, date, type, price] = parts.length >= 4 ? parts : line.split(';');
+
+      const isPublic = type?.toLowerCase().includes('pub') || type?.toLowerCase().includes('púb');
+
+      let formattedDate = date?.trim() || '';
+      if (formattedDate.includes('/')) {
+        const [d, m, y] = formattedDate.split('/');
+        formattedDate = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+      }
+
+      return {
+        source: source?.trim() || '',
+        quote_date: formattedDate || new Date().toISOString().split('T')[0],
+        quote_type: isPublic ? 'public' as const : 'private' as const,
+        unit_price: parseFloat(price?.trim().replace('R$', '').replace(/\./g, '').replace(',', '.') || '0') || 0
+      };
+    }).filter(q => q.source && q.unit_price > 0);
+
+    if (newQuotes.length === 0) return;
+
+    try {
+      await fetch(`/api/items/${showBatchQuoteModal}/quotes/batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quotes: newQuotes })
+      });
+      fetchProcessDetails(selectedProcess);
+      setShowBatchQuoteModal(null);
+      setBatchQuoteText('');
     } catch (e) { console.error(e); }
   };
 
@@ -592,6 +677,9 @@ export default function App() {
                   <Button variant="secondary" onClick={() => setView('export')}>
                     <FileText size={18} /> Ver Mapa Final
                   </Button>
+                  <Button variant="secondary" onClick={() => setShowBatchItemModal(true)}>
+                    <Table size={18} /> Inserção em Lote
+                  </Button>
                   <Button onClick={() => setShowItemModal(true)}>
                     <Plus size={18} /> Adicionar Item
                   </Button>
@@ -624,7 +712,7 @@ export default function App() {
                             </div>
                           </div>
                           <div className="flex gap-2">
-                            <Button variant="ghost" onClick={() => {
+                            <Button variant="ghost" title="Editar Item" onClick={() => {
                               setEditingItem(item);
                               setNewItem({ 
                                 item_number: item.item_number, 
@@ -635,7 +723,7 @@ export default function App() {
                               });
                               setShowItemModal(true);
                             }}>
-                              <Copy size={18} className="text-slate-400" />
+                              <Pencil size={18} className="text-slate-400" />
                             </Button>
                             <Button variant="ghost" onClick={() => handleDeleteItem(item.id)}>
                               <Trash2 size={18} className="text-red-400" />
@@ -648,15 +736,26 @@ export default function App() {
                           <div className="lg:col-span-2 space-y-4">
                             <div className="flex justify-between items-center">
                               <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Cotações Coletadas</h4>
-                              <button 
-                                onClick={() => {
-                                  setEditingQuote(null);
-                                  setShowQuoteModal(item.id);
-                                }}
-                                className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
-                              >
-                                <Plus size={14} /> ADICIONAR PREÇO
-                              </button>
+                              <div className="flex gap-4">
+                                <button
+                                  onClick={() => {
+                                    setBatchQuoteText('');
+                                    setShowBatchQuoteModal(item.id);
+                                  }}
+                                  className="text-xs font-bold text-slate-500 hover:text-slate-700 flex items-center gap-1"
+                                >
+                                  <Table size={14} /> PREÇOS EM LOTE
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setEditingQuote(null);
+                                    setShowQuoteModal(item.id);
+                                  }}
+                                  className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
+                                >
+                                  <Plus size={14} /> ADICIONAR PREÇO
+                                </button>
+                              </div>
                             </div>
 
                             <div className="space-y-2">
@@ -786,8 +885,9 @@ export default function App() {
                   onChange={e => setNewProcess({...newProcess, process_number: e.target.value})}
                 />
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Objeto da Contratação</label>
+                  <label htmlFor="object-textarea" className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Objeto da Contratação</label>
                   <textarea 
+                    id="object-textarea"
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all min-h-[100px]"
                     placeholder="Descreva o que está sendo contratado..."
                     required
@@ -798,6 +898,86 @@ export default function App() {
                 <div className="flex gap-3 pt-4">
                   <Button variant="secondary" className="flex-1" onClick={() => setShowProcessModal(false)}>Cancelar</Button>
                   <Button type="submit" className="flex-1">Criar Processo</Button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+
+        {showBatchQuoteModal !== null && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-3xl p-8 w-full max-w-2xl shadow-2xl"
+            >
+              <div className="flex justify-between items-start mb-6">
+                <div>
+                  <h3 className="text-2xl font-bold">Inserção de Preços em Lote</h3>
+                  <p className="text-sm text-slate-500">Cole as linhas da sua planilha (Colunas: Fornecedor, Data, Tipo, Valor Unitário)</p>
+                </div>
+                <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center">
+                  <Table size={20} className="text-slate-400" />
+                </div>
+              </div>
+
+              <form onSubmit={handleBatchCreateQuote} className="space-y-6">
+                <textarea
+                  className="w-full h-64 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-mono text-sm"
+                  placeholder="Exemplo:&#10;Fornecedor A	01/01/2024	Privado	150,00&#10;Fornecedor B	02/01/2024	Público	145,50"
+                  value={batchQuoteText}
+                  onChange={e => setBatchQuoteText(e.target.value)}
+                  required
+                />
+
+                <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl text-xs text-blue-700">
+                  <strong>Dica:</strong> Copie as quatro colunas da sua planilha e cole aqui. O sistema reconhece datas em formato DD/MM/AAAA e valores com vírgula. Tipos contendo "pub" serão marcados como Públicos.
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <Button variant="secondary" className="flex-1" onClick={() => { setShowBatchQuoteModal(null); setBatchQuoteText(''); }}>Cancelar</Button>
+                  <Button type="submit" className="flex-1">Salvar {batchQuoteText.split('\n').filter(l => l.trim()).length} Cotações</Button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+
+        {showBatchItemModal && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-3xl p-8 w-full max-w-2xl shadow-2xl"
+            >
+              <div className="flex justify-between items-start mb-6">
+                <div>
+                  <h3 className="text-2xl font-bold">Inserção de Itens em Lote</h3>
+                  <p className="text-sm text-slate-500">Cole as linhas da sua planilha (Colunas: Especificação, Unidade, Quantidade)</p>
+                </div>
+                <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center">
+                  <Table size={20} className="text-slate-400" />
+                </div>
+              </div>
+
+              <form onSubmit={handleBatchCreateItem} className="space-y-6">
+                <textarea
+                  className="w-full h-64 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all font-mono text-sm"
+                  placeholder="Exemplo:&#10;Cadeira de Escritório	UN	10&#10;Mesa de Reunião	UN	2"
+                  value={batchItemText}
+                  onChange={e => setBatchItemText(e.target.value)}
+                  required
+                />
+
+                <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl text-xs text-blue-700">
+                  <strong>Dica:</strong> No Excel ou Google Sheets, selecione as três colunas e as linhas desejadas, copie (Ctrl+C) e cole aqui (Ctrl+V). O sistema identificará automaticamente as colunas.
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <Button variant="secondary" className="flex-1" onClick={() => { setShowBatchItemModal(false); setBatchItemText(''); }}>Cancelar</Button>
+                  <Button type="submit" className="flex-1">Processar e Salvar {batchItemText.split('\n').filter(l => l.trim()).length} itens</Button>
                 </div>
               </form>
             </motion.div>
