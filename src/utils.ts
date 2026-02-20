@@ -67,5 +67,11 @@ export const formatCurrency = (value: number) => {
 };
 
 export const formatDate = (dateString: string) => {
+  if (!dateString) return '-';
+  // Se a string estiver apenas no formato YYYY-MM-DD, tratamos para evitar problemas de fuso horário
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+    const [year, month, day] = dateString.split('-').map(Number);
+    return new Date(year, month - 1, day).toLocaleDateString('pt-BR');
+  }
   return new Date(dateString).toLocaleDateString('pt-BR');
 };
